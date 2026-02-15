@@ -1,0 +1,44 @@
+# Visual Studio / MSVC
+.vs/
+x64/
+Debug/
+Release/
+*.user
+*.ncb
+*.suo
+*.sdf
+*.opensdf
+*.db
+*.opendb
+*.ipch
+
+# Build outputs
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.dll
+*.lib
+*.exp
+*.log
+*.tlog/
+*.lastbuildstate
+*.idb
+*.res
+*.recipe
+
+# Intermediate directories
+ipch/
+vampire/x64/
+vampire/Debug/
+vampire/Release/
+
+# OS
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+# Temporary scripts
+update_vcxproj.ps1
+update_filters.ps1
