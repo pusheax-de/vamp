@@ -169,6 +169,8 @@
     <Image Include="vampire.ico" />
   </ItemGroup>
   <ItemGroup>
+    <None Include=".gitignore" />
+    <None Include="README.md" />
     <None Include="update_filters.ps1" />
     <None Include="update_vcxproj.ps1" />
   </ItemGroup>
