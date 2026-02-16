@@ -76,6 +76,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>$(ProjectDir)engine;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -90,6 +91,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>$(ProjectDir)engine;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -102,6 +104,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>$(ProjectDir)engine;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -116,6 +119,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>$(ProjectDir)engine;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -123,6 +127,25 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="engine\BackgroundPager.h" />
+    <ClInclude Include="engine\Camera2D.h" />
+    <ClInclude Include="engine\DescriptorAllocator.h" />
+    <ClInclude Include="engine\Engine.h" />
+    <ClInclude Include="engine\EngineTypes.h" />
+    <ClInclude Include="engine\FogRenderer.h" />
+    <ClInclude Include="engine\Grid.h" />
+    <ClInclude Include="engine\InputSystem.h" />
+    <ClInclude Include="engine\LightSystem.h" />
+    <ClInclude Include="engine\OccluderSet.h" />
+    <ClInclude Include="engine\PipelineStates.h" />
+    <ClInclude Include="engine\RendererD3D12.h" />
+    <ClInclude Include="engine\RenderQueue.h" />
+    <ClInclude Include="engine\RenderTarget.h" />
+    <ClInclude Include="engine\RoofSystem.h" />
+    <ClInclude Include="engine\SceneRenderer.h" />
+    <ClInclude Include="engine\SpriteAtlas.h" />
+    <ClInclude Include="engine\Texture2D.h" />
+    <ClInclude Include="engine\UploadManager.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="game\Armor.h" />
     <ClInclude Include="game\Attributes.h" />
@@ -136,6 +159,9 @@
     <ClInclude Include="game\GameWorld.h" />
     <ClInclude Include="game\Inventory.h" />
     <ClInclude Include="game\MapTile.h" />
+    <ClInclude Include="game\SceneData.h" />
+    <ClInclude Include="game\SceneFile.h" />
+    <ClInclude Include="game\SceneLoader.h" />
     <ClInclude Include="game\Skill.h" />
     <ClInclude Include="game\SkillDefs.h" />
     <ClInclude Include="game\SleepSystem.h" />
@@ -147,6 +173,15 @@
     <ClInclude Include="vampire.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="engine\BackgroundPager.cpp" />
+    <ClCompile Include="engine\DescriptorAllocator.cpp" />
+    <ClCompile Include="engine\FogRenderer.cpp" />
+    <ClCompile Include="engine\PipelineStates.cpp" />
+    <ClCompile Include="engine\RendererD3D12.cpp" />
+    <ClCompile Include="engine\RenderTarget.cpp" />
+    <ClCompile Include="engine\SceneRenderer.cpp" />
+    <ClCompile Include="engine\Texture2D.cpp" />
+    <ClCompile Include="engine\UploadManager.cpp" />
     <ClCompile Include="game\Character.cpp" />
     <ClCompile Include="game\CombatSystem.cpp" />
     <ClCompile Include="game\CoverSystem.cpp" />
@@ -155,6 +190,8 @@
     <ClCompile Include="game\FogOfWar.cpp" />
     <ClCompile Include="game\GameWorld.cpp" />
     <ClCompile Include="game\Inventory.cpp" />
+    <ClCompile Include="game\SceneFile.cpp" />
+    <ClCompile Include="game\SceneLoader.cpp" />
     <ClCompile Include="game\Skill.cpp" />
     <ClCompile Include="game\SleepSystem.cpp" />
     <ClCompile Include="game\SocialSystem.cpp" />
@@ -174,6 +211,22 @@
     <None Include="update_filters.ps1" />
     <None Include="update_vcxproj.ps1" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="engine\shaders\CompositePS.hlsl" />
+    <None Include="engine\shaders\CompositeVS.hlsl" />
+    <None Include="engine\shaders\GridOverlayPS.hlsl" />
+    <None Include="engine\shaders\GridOverlayVS.hlsl" />
+    <None Include="engine\shaders\LightRadialPS.hlsl" />
+    <None Include="engine\shaders\LightRadialVS.hlsl" />
+    <None Include="engine\shaders\ShadowVolumeVS.hlsl" />
+    <None Include="engine\shaders\SpritePS.hlsl" />
+    <None Include="engine\shaders\SpriteVS.hlsl" />
+  </ItemGroup>
+  <ItemDefinitionGroup>
+    <PostBuildEvent>
+      <Command>xcopy /Y /I /E "$(ProjectDir)engine\shaders" "$(OutDir)shaders\"</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
