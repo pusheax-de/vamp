@@ -134,7 +134,9 @@ void SceneRenderer::RenderFrame(RendererD3D12& renderer,
     m_frameConstants.fogTexelSize   = { 1.0f / m_config.fogResWidth,
                                          1.0f / m_config.fogResHeight };
     m_frameConstants.ambientDarkening = 0.15f;
-    m_frameConstants.pad[0] = m_frameConstants.pad[1] = m_frameConstants.pad[2] = 0.0f;
+    m_frameConstants.fogColor = { 36.0f / 255.0f, 36.0f / 255.0f, 36.0f / 255.0f };
+    m_frameConstants.fogWorldOrigin = { fog.GetWorldOriginX(), fog.GetWorldOriginY() };
+    m_frameConstants.fogWorldSize   = { fog.GetWorldWidth(), fog.GetWorldHeight() };
 
     UploadFrameConstants(renderer);
     renderQueue.Sort();

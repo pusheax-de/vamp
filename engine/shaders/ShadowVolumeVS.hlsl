@@ -10,7 +10,9 @@ cbuffer FrameConstants : register(b0)
     float2   screenSize;
     float2   fogTexelSize;
     float    ambientDarkening;
-    float3   pad;
+    float3   fogColor;
+    float2   fogWorldOrigin;
+    float2   fogWorldSize;
 };
 
 struct VSInput

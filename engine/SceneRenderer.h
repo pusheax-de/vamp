@@ -55,7 +55,9 @@ struct FrameConstants
     DirectX::XMFLOAT2   screenSize;
     DirectX::XMFLOAT2   fogTexelSize;      // 1.0 / fogRes
     float                ambientDarkening;  // 0.0 = fully dark, 1.0 = no darkening
-    float                pad[3];
+    DirectX::XMFLOAT3   fogColor;          // RGB color for unexplored fog areas
+    DirectX::XMFLOAT2   fogWorldOrigin;    // World-space origin of fog texture
+    DirectX::XMFLOAT2   fogWorldSize;      // World-space extent of fog texture
 };
 
 // ---------------------------------------------------------------------------

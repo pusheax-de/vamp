@@ -59,6 +59,11 @@ public:
     uint32_t GetFogWidth() const { return m_fogWidth; }
     uint32_t GetFogHeight() const { return m_fogHeight; }
 
+    float GetWorldOriginX() const { return m_worldOriginX; }
+    float GetWorldOriginY() const { return m_worldOriginY; }
+    float GetWorldWidth() const { return m_worldWidth; }
+    float GetWorldHeight() const { return m_worldHeight; }
+
     bool NeedsUpload() const { return m_dirty; }
 
     // Access underlying GPU resources (for creating SRVs in alternate heap locations)
