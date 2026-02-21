@@ -83,6 +83,19 @@ public:
     // Is a scene currently loaded?
     bool IsLoaded() const { return m_loaded; }
 
+    // ----- Developer mode -----
+
+    // Enable developer mode: override player spawn position.
+    // Call before LoadScene. Pass tileX/tileY to override the scene's spawn.
+    void SetDevModeSpawn(bool enabled, int tileX = 0, int tileY = 0)
+    {
+        m_devModeSpawn = enabled;
+        m_devSpawnX    = tileX;
+        m_devSpawnY    = tileY;
+    }
+
+    bool IsDevMode() const { return m_devModeSpawn; }
+
     // ----- Access to loaded scene data -----
 
     const SceneData& GetSceneData() const { return m_scene; }
@@ -120,6 +133,11 @@ public:
 private:
     SceneData   m_scene;
     bool        m_loaded = false;
+
+    // Developer mode spawn override
+    bool        m_devModeSpawn = false;
+    int         m_devSpawnX    = 0;
+    int         m_devSpawnY    = 0;
 
     // Populate engine occluders from tile grid
     void BuildOccluders(engine::OccluderSet& occluders) const;

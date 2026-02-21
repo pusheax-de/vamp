@@ -101,6 +101,18 @@ public:
                      RoofSystem& roofs,
                      float time);
 
+    // Draw a grid overlay on the backbuffer (call between RenderFrame and EndFrame)
+    void DrawGridOverlay(RendererD3D12& renderer, Camera2D& camera, const Grid& grid,
+                         float r, float g, float b, float a);
+
+    // Draw line segments on the backbuffer using the grid overlay PSO
+    void DrawLineOverlay(RendererD3D12& renderer,
+                         const DirectX::XMFLOAT2* vertices, size_t vertexCount,
+                         float r, float g, float b, float a);
+
+    // Expose frame CBV address so overlays can share the same uploaded constants
+    D3D12_GPU_VIRTUAL_ADDRESS GetFrameCBVAddress() const { return m_frameCBVAddress; }
+
     // Access render targets for custom passes
     RenderTarget&       GetSceneColor() { return m_sceneColor; }
     RenderTarget&       GetLightAccum() { return m_lightAccum; }
@@ -140,6 +152,9 @@ private:
     RenderTarget        m_sceneColor;       // Full-res RGBA8 SRGB
     RenderTarget        m_lightAccum;       // Half-res R11G11B10_FLOAT
     DepthStencilTarget  m_depthStencil;     // Full-res D24S8 (stencil for shadows)
+
+    // Contiguous SRV block for composite pass (4 descriptors: scene, light, fogVis, fogExp)
+    uint32_t            m_compositeSRVBase = UINT32_MAX;
 
     // PSOs and shaders
     PipelineStates      m_pso;

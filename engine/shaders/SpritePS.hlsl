@@ -1,6 +1,6 @@
 // SpritePS.hlsl - Pixel shader for textured sprites
 
-Texture2D textures[] : register(t0, space0);
+Texture2D textures[1024] : register(t0, space0);
 SamplerState linearSampler : register(s0);
 
 struct PSInput

@@ -20,6 +20,13 @@ bool SceneRenderer::Init(RendererD3D12& renderer, const SceneRendererConfig& con
     auto& srvHeap = renderer.GetSRVHeap();
     auto& dsvHeap = renderer.GetDSVHeap();
 
+    // Reserve 4 contiguous SRV slots for the composite pass
+    // (SceneColor, LightAccum, FogVisible, FogExplored)
+    m_compositeSRVBase = srvHeap.Allocate();
+    srvHeap.Allocate(); // slot +1
+    srvHeap.Allocate(); // slot +2
+    srvHeap.Allocate(); // slot +3
+
     if (!m_sceneColor.Create(device, rtvHeap, srvHeap,
                               config.fullResWidth, config.fullResHeight,
                               DXGI_FORMAT_R8G8B8A8_UNORM_SRGB))
@@ -48,6 +55,17 @@ void SceneRenderer::Shutdown(RendererD3D12& renderer)
     m_sceneColor.Shutdown(renderer.GetRTVHeap(), renderer.GetSRVHeap());
     m_lightAccum.Shutdown(renderer.GetRTVHeap(), renderer.GetSRVHeap());
     m_depthStencil.Shutdown(renderer.GetDSVHeap());
+
+    // Free the 4 composite SRV slots
+    if (m_compositeSRVBase != UINT32_MAX)
+    {
+        auto& srvHeap = renderer.GetSRVHeap();
+        srvHeap.Free(m_compositeSRVBase);
+        srvHeap.Free(m_compositeSRVBase + 1);
+        srvHeap.Free(m_compositeSRVBase + 2);
+        srvHeap.Free(m_compositeSRVBase + 3);
+        m_compositeSRVBase = UINT32_MAX;
+    }
 }
 
 void SceneRenderer::Resize(RendererD3D12& renderer, uint32_t width, uint32_t height)
@@ -136,9 +154,12 @@ void SceneRenderer::RenderFrame(RendererD3D12& renderer,
 
     // --- Pass 2: Base scene draw -> SceneColor ---
     {
-        const float clearColor[] = { 0.05f, 0.05f, 0.08f, 1.0f };
-        m_sceneColor.Clear(cmdList, renderer.GetRTVHeap(), clearColor);
+        // Ensure render targets are in RT state
+        m_sceneColor.TransitionTo(cmdList, D3D12_RESOURCE_STATE_RENDER_TARGET);
         m_depthStencil.Clear(cmdList, renderer.GetDSVHeap());
+
+        const float clearColor[] = { 0.0f, 0.0f, 0.0f, 0.0f };
+        m_sceneColor.Clear(cmdList, renderer.GetRTVHeap(), clearColor);
 
         PassBackground(cmdList, renderer, camera, bgPager);
         PassBaseScene(cmdList, renderer, camera, renderQueue);
@@ -146,6 +167,8 @@ void SceneRenderer::RenderFrame(RendererD3D12& renderer,
 
     // --- Pass 3: Dynamic lighting + shadows -> LightAccum ---
     {
+        m_lightAccum.TransitionTo(cmdList, D3D12_RESOURCE_STATE_RENDER_TARGET);
+
         const float clearBlack[] = { 0.0f, 0.0f, 0.0f, 0.0f };
         m_lightAccum.Clear(cmdList, renderer.GetRTVHeap(), clearBlack);
         m_depthStencil.Clear(cmdList, renderer.GetDSVHeap(), 1.0f, 0);
@@ -266,9 +289,19 @@ void SceneRenderer::PassBaseScene(ID3D12GraphicsCommandList* cmdList,
     if (totalItems == 0)
         return;
 
-    // RT should already be set from PassBackground, but ensure it
+    // Set render target, viewport, and scissor
     auto rtvHandle = renderer.GetRTVHeap().GetCPUHandle(m_sceneColor.GetRTVIndex());
     cmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+
+    D3D12_VIEWPORT vp = { 0, 0,
+                           static_cast<float>(m_config.fullResWidth),
+                           static_cast<float>(m_config.fullResHeight),
+                           0.0f, 1.0f };
+    D3D12_RECT scissor = { 0, 0,
+                            static_cast<LONG>(m_config.fullResWidth),
+                            static_cast<LONG>(m_config.fullResHeight) };
+    cmdList->RSSetViewports(1, &vp);
+    cmdList->RSSetScissorRects(1, &scissor);
 
     cmdList->SetGraphicsRootSignature(m_pso.GetMainRootSig());
     cmdList->SetPipelineState(m_pso.GetSpritePSO());
@@ -350,6 +383,8 @@ void SceneRenderer::PassLighting(ID3D12GraphicsCommandList* cmdList,
             cmdList->SetGraphicsRootSignature(m_pso.GetMainRootSig());
             cmdList->SetPipelineState(m_pso.GetShadowVolumePSO());
             cmdList->SetGraphicsRootConstantBufferView(0, m_frameCBVAddress);
+            cmdList->SetGraphicsRootDescriptorTable(1,
+                renderer.GetSRVHeap().GetGPUHandle(0));
             cmdList->OMSetStencilRef(1);
 
             cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -410,6 +445,44 @@ void SceneRenderer::PassComposite(ID3D12GraphicsCommandList* cmdList,
                                    RendererD3D12& renderer,
                                    FogRenderer& fog)
 {
+    auto* device = renderer.GetDevice();
+    auto& srvHeap = renderer.GetSRVHeap();
+
+    // Create SRV views directly into the 4 contiguous composite slots.
+    // We cannot copy from the shader-visible heap (it's write-only on CPU),
+    // so we re-create the views each frame into the reserved block.
+
+    // Helper to create a Texture2D SRV at a specific heap index
+    auto createSRV = [&](uint32_t heapIndex, ID3D12Resource* resource, DXGI_FORMAT format)
+    {
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Format                    = format;
+        srvDesc.ViewDimension             = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Shader4ComponentMapping   = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Texture2D.MipLevels       = 1;
+        device->CreateShaderResourceView(resource, &srvDesc,
+                                          srvHeap.GetCPUHandle(heapIndex));
+    };
+
+    // Slot 0: SceneColor
+    createSRV(m_compositeSRVBase, m_sceneColor.GetResource(), m_sceneColor.GetFormat());
+
+    // Slot 1: LightAccum
+    createSRV(m_compositeSRVBase + 1, m_lightAccum.GetResource(), m_lightAccum.GetFormat());
+
+    // Slot 2: FogVisible
+    if (fog.GetVisibleResource())
+        createSRV(m_compositeSRVBase + 2, fog.GetVisibleResource(), fog.GetTextureFormat());
+    else
+        createSRV(m_compositeSRVBase + 2, m_sceneColor.GetResource(), m_sceneColor.GetFormat());
+
+    // Slot 3: FogExplored
+    if (fog.GetExploredResource())
+        createSRV(m_compositeSRVBase + 3, fog.GetExploredResource(), fog.GetTextureFormat());
+    else
+        createSRV(m_compositeSRVBase + 3, m_sceneColor.GetResource(), m_sceneColor.GetFormat());
+
+    // Now render the fullscreen composite
     auto backRTV = renderer.GetBackBufferRTV();
     cmdList->OMSetRenderTargets(1, &backRTV, FALSE, nullptr);
 
@@ -427,18 +500,12 @@ void SceneRenderer::PassComposite(ID3D12GraphicsCommandList* cmdList,
     cmdList->SetPipelineState(m_pso.GetCompositePSO());
     cmdList->SetGraphicsRootConstantBufferView(0, m_frameCBVAddress);
 
-    // Bind SRV table: [SceneColor, LightAccum, FogVisible, FogExplored]
-    // The composite root sig expects 4 contiguous SRVs. We point the table
-    // at the SRV heap base; the shader indexes t0-t3 relative to this.
-    // For simplicity, we just point at the persistent heap — the SRVs were
-    // created at known indices. The fullscreen shader will sample them.
+    // Bind the contiguous 4-SRV table
     cmdList->SetGraphicsRootDescriptorTable(1,
-        renderer.GetSRVHeap().GetGPUHandle(m_sceneColor.GetSRVIndex()));
+        srvHeap.GetGPUHandle(m_compositeSRVBase));
 
     cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     cmdList->DrawInstanced(3, 1, 0, 0); // Fullscreen triangle
-
-    (void)fog;
 }
 
 // ===========================================================================
@@ -493,6 +560,126 @@ void SceneRenderer::PassUI(ID3D12GraphicsCommandList* cmdList,
     cmdList->IASetVertexBuffers(1, 1, &ibv);
 
     cmdList->DrawInstanced(4, static_cast<UINT>(instances.size()), 0, 0);
+}
+
+// ===========================================================================
+// Debug overlays (grid lines, wall highlights)
+// ===========================================================================
+
+void SceneRenderer::DrawGridOverlay(RendererD3D12& renderer, Camera2D& camera,
+                                     const Grid& grid,
+                                     float r, float g, float b, float a)
+{
+    auto* cmdList = renderer.GetCommandList();
+
+    // Determine visible tile range
+    auto vb = camera.GetViewBounds();
+    int tileX0, tileY0, tileX1, tileY1;
+    grid.WorldToTile(vb.left, vb.top, tileX0, tileY0);
+    grid.WorldToTile(vb.right, vb.bottom, tileX1, tileY1);
+
+    tileX0 = (std::max)(tileX0 - 1, 0);
+    tileY0 = (std::max)(tileY0 - 1, 0);
+    tileX1 = (std::min)(tileX1 + 1, grid.GetGridWidth());
+    tileY1 = (std::min)(tileY1 + 1, grid.GetGridHeight());
+
+    int cols = tileX1 - tileX0 + 1;
+    int rows = tileY1 - tileY0 + 1;
+
+    // Build grid line segments: horizontal + vertical
+    // Each line = 2 vertices (XMFLOAT2)
+    size_t lineCount = static_cast<size_t>(rows + 1) + static_cast<size_t>(cols + 1);
+    size_t vertCount = lineCount * 2;
+
+    std::vector<DirectX::XMFLOAT2> verts;
+    verts.reserve(vertCount);
+
+    float ox = grid.GetOriginX();
+    float oy = grid.GetOriginY();
+    float ts = grid.GetTileSize();
+
+    // Horizontal lines
+    for (int y = tileY0; y <= tileY1; ++y)
+    {
+        float wy = oy + y * ts;
+        float wx0 = ox + tileX0 * ts;
+        float wx1 = ox + tileX1 * ts;
+        verts.push_back({ wx0, wy });
+        verts.push_back({ wx1, wy });
+    }
+
+    // Vertical lines
+    for (int x = tileX0; x <= tileX1; ++x)
+    {
+        float wx = ox + x * ts;
+        float wy0 = oy + tileY0 * ts;
+        float wy1 = oy + tileY1 * ts;
+        verts.push_back({ wx, wy0 });
+        verts.push_back({ wx, wy1 });
+    }
+
+    DrawLineOverlay(renderer, verts.data(), verts.size(), r, g, b, a);
+}
+
+void SceneRenderer::DrawLineOverlay(RendererD3D12& renderer,
+                                     const DirectX::XMFLOAT2* vertices,
+                                     size_t vertexCount,
+                                     float r, float g, float b, float a)
+{
+    if (vertexCount < 2)
+        return;
+
+    auto* cmdList = renderer.GetCommandList();
+
+    // Upload compact overlay constants: viewProjection + color
+    struct OverlayConstants
+    {
+        DirectX::XMFLOAT4X4 viewProjection;
+        DirectX::XMFLOAT4   color;
+    };
+
+    OverlayConstants oc;
+    oc.viewProjection = m_frameConstants.viewProjection;
+    oc.color = { r, g, b, a };
+
+    auto cbAlloc = renderer.GetUploadManager().Allocate(
+        sizeof(OverlayConstants), D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
+    std::memcpy(cbAlloc.cpuPtr, &oc, sizeof(OverlayConstants));
+
+    // Upload vertex data
+    auto vtxAlloc = renderer.GetUploadManager().Allocate(
+        vertexCount * sizeof(DirectX::XMFLOAT2), 16);
+    std::memcpy(vtxAlloc.cpuPtr, vertices, vertexCount * sizeof(DirectX::XMFLOAT2));
+
+    // Bind backbuffer RT
+    auto backRTV = renderer.GetBackBufferRTV();
+    cmdList->OMSetRenderTargets(1, &backRTV, FALSE, nullptr);
+
+    D3D12_VIEWPORT vp = { 0, 0,
+                           static_cast<float>(renderer.GetWidth()),
+                           static_cast<float>(renderer.GetHeight()),
+                           0.0f, 1.0f };
+    D3D12_RECT scissor = { 0, 0,
+                            static_cast<LONG>(renderer.GetWidth()),
+                            static_cast<LONG>(renderer.GetHeight()) };
+    cmdList->RSSetViewports(1, &vp);
+    cmdList->RSSetScissorRects(1, &scissor);
+
+    cmdList->SetGraphicsRootSignature(m_pso.GetMainRootSig());
+    cmdList->SetPipelineState(m_pso.GetGridOverlayPSO());
+    cmdList->SetGraphicsRootConstantBufferView(0, cbAlloc.gpuAddress);
+    cmdList->SetGraphicsRootDescriptorTable(1,
+        renderer.GetSRVHeap().GetGPUHandle(0));
+
+    cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
+
+    D3D12_VERTEX_BUFFER_VIEW vbv;
+    vbv.BufferLocation = vtxAlloc.gpuAddress;
+    vbv.SizeInBytes    = static_cast<UINT>(vertexCount * sizeof(DirectX::XMFLOAT2));
+    vbv.StrideInBytes  = sizeof(DirectX::XMFLOAT2);
+    cmdList->IASetVertexBuffers(0, 1, &vbv);
+
+    cmdList->DrawInstanced(static_cast<UINT>(vertexCount), 1, 0, 0);
 }
 
 } // namespace engine

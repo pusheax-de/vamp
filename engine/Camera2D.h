@@ -100,7 +100,7 @@ private:
             m_worldY + halfH, m_worldY - halfH, // Flip Y for screen coords (top = smaller Y)
             0.0f, 1.0f);
 
-        DirectX::XMStoreFloat4x4(&m_viewProj, proj);
+        DirectX::XMStoreFloat4x4(&m_viewProj, XMMatrixTranspose(proj));
     }
 
     float       m_worldX        = 0.0f;

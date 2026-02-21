@@ -157,6 +157,7 @@
     <ClInclude Include="game\FogOfWar.h" />
     <ClInclude Include="game\GameSystems.h" />
     <ClInclude Include="game\GameWorld.h" />
+    <ClInclude Include="game\GenerateTestScene.h" />
     <ClInclude Include="game\Inventory.h" />
     <ClInclude Include="game\MapTile.h" />
     <ClInclude Include="game\SceneData.h" />
@@ -189,6 +190,7 @@
     <ClCompile Include="game\Discipline.cpp" />
     <ClCompile Include="game\FogOfWar.cpp" />
     <ClCompile Include="game\GameWorld.cpp" />
+    <ClCompile Include="game\GenerateTestScene.cpp" />
     <ClCompile Include="game\Inventory.cpp" />
     <ClCompile Include="game\SceneFile.cpp" />
     <ClCompile Include="game\SceneLoader.cpp" />

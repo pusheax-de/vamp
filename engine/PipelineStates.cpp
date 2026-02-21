@@ -105,10 +105,10 @@ bool PipelineStates::CreateMainRootSignature(ID3D12Device* device)
     rootParams[0].Descriptor.RegisterSpace  = 0;
     rootParams[0].ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
 
-    // SRV table (unbounded array of textures at t0)
+    // SRV table (bounded array of textures at t0)
     D3D12_DESCRIPTOR_RANGE srvRange = {};
     srvRange.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    srvRange.NumDescriptors                    = UINT_MAX; // Unbounded
+    srvRange.NumDescriptors                    = 1024;
     srvRange.BaseShaderRegister                = 0;
     srvRange.RegisterSpace                     = 0;
     srvRange.OffsetInDescriptorsFromTableStart = 0;

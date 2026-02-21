@@ -61,6 +61,11 @@ public:
 
     bool NeedsUpload() const { return m_dirty; }
 
+    // Access underlying GPU resources (for creating SRVs in alternate heap locations)
+    ID3D12Resource* GetVisibleResource() const { return m_ownedVisibleTex.GetResource(); }
+    ID3D12Resource* GetExploredResource() const { return m_ownedExploredTex.GetResource(); }
+    DXGI_FORMAT     GetTextureFormat() const { return m_ownedVisibleTex.GetFormat(); }
+
 private:
     // World-to-fog coordinate conversion
     void WorldToFog(float wx, float wy, int& fx, int& fy) const;

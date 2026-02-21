@@ -1,15 +1,9 @@
 // GridOverlayVS.hlsl - Vertex shader for tile grid wireframe overlay
 
-cbuffer FrameConstants : register(b0)
+cbuffer OverlayConstants : register(b0)
 {
     float4x4 viewProjection;
-    float2   cameraPosition;
-    float    cameraZoom;
-    float    time;
-    float2   screenSize;
-    float2   fogTexelSize;
-    float    ambientDarkening;
-    float3   pad;
+    float4   overlayColor;
 };
 
 struct VSInput

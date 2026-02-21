@@ -144,16 +144,19 @@ public:
         m_scrollAccum = 0.0f;
 
         // --- Camera: WASD / arrow-key pan ---
-        float panSpeed = m_cameraPanSpeed * deltaTime / camera.GetZoom();
+        if (m_keyboardPanEnabled)
+        {
+            float panSpeed = m_cameraPanSpeed * deltaTime / camera.GetZoom();
 
-        float panX = 0.0f, panY = 0.0f;
-        if (IsKeyDown('W') || IsKeyDown(VK_UP))    panY -= panSpeed;
-        if (IsKeyDown('S') || IsKeyDown(VK_DOWN))   panY += panSpeed;
-        if (IsKeyDown('A') || IsKeyDown(VK_LEFT))   panX -= panSpeed;
-        if (IsKeyDown('D') || IsKeyDown(VK_RIGHT))  panX += panSpeed;
+            float panX = 0.0f, panY = 0.0f;
+            if (IsKeyDown('W') || IsKeyDown(VK_UP))    panY -= panSpeed;
+            if (IsKeyDown('S') || IsKeyDown(VK_DOWN))   panY += panSpeed;
+            if (IsKeyDown('A') || IsKeyDown(VK_LEFT))   panX -= panSpeed;
+            if (IsKeyDown('D') || IsKeyDown(VK_RIGHT))  panX += panSpeed;
 
-        if (panX != 0.0f || panY != 0.0f)
-            camera.SetPosition(camera.GetWorldX() + panX, camera.GetWorldY() + panY);
+            if (panX != 0.0f || panY != 0.0f)
+                camera.SetPosition(camera.GetWorldX() + panX, camera.GetWorldY() + panY);
+        }
 
         // --- Camera: edge-scroll (mouse near window edge) ---
         if (m_edgeScrollEnabled)
@@ -172,6 +175,15 @@ public:
 
             if (ex != 0.0f || ey != 0.0f)
                 camera.SetPosition(camera.GetWorldX() + ex, camera.GetWorldY() + ey);
+        }
+
+        // --- Camera: right-mouse-button drag pan ---
+        if (IsMouseDown(MouseButton::Right))
+        {
+            float dx = static_cast<float>(m_mouseDeltaX);
+            float dy = static_cast<float>(m_mouseDeltaY);
+            if (dx != 0.0f || dy != 0.0f)
+                camera.Pan(-dx, -dy);
         }
 
         // --- Camera: middle-mouse drag pan ---
@@ -212,11 +224,22 @@ public:
                 m_clickTileX   = m_hoverTileX;
                 m_clickTileY   = m_hoverTileY;
             }
+            // Right-click tile only on press, not while dragging the camera
             if (IsMousePressed(MouseButton::Right))
             {
-                m_tileRightClicked = true;
-                m_rightClickTileX  = m_hoverTileX;
-                m_rightClickTileY  = m_hoverTileY;
+                m_rightClickStartX = m_mouseX;
+                m_rightClickStartY = m_mouseY;
+            }
+            if (IsMouseReleased(MouseButton::Right))
+            {
+                int dragDist = std::abs(m_mouseX - m_rightClickStartX)
+                             + std::abs(m_mouseY - m_rightClickStartY);
+                if (dragDist < 5)
+                {
+                    m_tileRightClicked = true;
+                    m_rightClickTileX  = m_hoverTileX;
+                    m_rightClickTileY  = m_hoverTileY;
+                }
             }
         }
 
@@ -274,6 +297,7 @@ public:
     void SetEdgeScrollEnabled(bool enabled)      { m_edgeScrollEnabled = enabled; }
     void SetEdgeScrollMargin(int pixels)         { m_edgeScrollMargin  = pixels; }
     void SetEdgeScrollSpeed(float pixelsPerSec)  { m_edgeScrollSpeed   = pixelsPerSec; }
+    void SetKeyboardPanEnabled(bool enabled)     { m_keyboardPanEnabled = enabled; }
 
 private:
     // Keyboard state
@@ -319,12 +343,17 @@ private:
     bool m_tileRightClicked  = false;
     int  m_rightClickTileX   = 0;
     int  m_rightClickTileY   = 0;
+    int  m_rightClickStartX  = 0;
+    int  m_rightClickStartY  = 0;
 
     // Camera control tuning
     float m_cameraPanSpeed   = 600.0f;  // Pixels per second at zoom=1
     float m_zoomSensitivity  = 0.15f;   // Per scroll notch
     float m_zoomMin          = 0.25f;
     float m_zoomMax          = 4.0f;
+
+    // Keyboard pan toggle
+    bool  m_keyboardPanEnabled = true;
 
     // Edge-scroll tuning
     bool  m_edgeScrollEnabled = true;

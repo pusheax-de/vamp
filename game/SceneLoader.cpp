@@ -55,8 +55,15 @@ bool SceneLoader::LoadScene(const std::string& filePath,
              grid.GetWorldWidth(), grid.GetWorldHeight(),
              hdr.originX, hdr.originY);
 
-    // --- Center camera on player spawn ---
-    auto spawnWorld = grid.TileToWorld(m_scene.playerSpawnX, m_scene.playerSpawnY);
+    // --- Center camera on player spawn (or dev override) ---
+    int spawnX = m_scene.playerSpawnX;
+    int spawnY = m_scene.playerSpawnY;
+    if (m_devModeSpawn)
+    {
+        spawnX = m_devSpawnX;
+        spawnY = m_devSpawnY;
+    }
+    auto spawnWorld = grid.TileToWorld(spawnX, spawnY);
     camera.SetPosition(spawnWorld.x, spawnWorld.y);
 
     m_loaded = true;
