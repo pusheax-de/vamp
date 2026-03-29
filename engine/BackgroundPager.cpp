@@ -40,6 +40,12 @@ void BackgroundPager::Shutdown(PersistentDescriptorAllocator& srvHeap)
     }
     m_cache.clear();
     m_pageToCache.clear();
+
+    if (m_bgImageReady)
+    {
+        m_bgImageTex.Shutdown(srvHeap);
+        m_bgImageReady = false;
+    }
 }
 
 void BackgroundPager::Update(const Camera2D& camera, uint32_t frameNumber)
@@ -150,6 +156,44 @@ std::vector<BackgroundPager::LoadedPage> BackgroundPager::GetVisiblePages() cons
     }
 
     return result;
+}
+
+bool BackgroundPager::SetBackgroundImage(ID3D12Device* device,
+                                          ID3D12GraphicsCommandList* cmdList,
+                                          UploadManager& uploadMgr,
+                                          PersistentDescriptorAllocator& srvHeap,
+                                          const std::wstring& imagePath,
+                                          float worldX, float worldY,
+                                          float worldW, float worldH)
+{
+    if (m_bgImageReady)
+    {
+        m_bgImageTex.Shutdown(srvHeap);
+        m_bgImageReady = false;
+    }
+
+    if (!m_bgImageTex.LoadFromPNG(device, cmdList, uploadMgr, srvHeap, imagePath))
+        return false;
+
+    m_bgImageWorldX = worldX;
+    m_bgImageWorldY = worldY;
+    m_bgImageWorldW = worldW;
+    m_bgImageWorldH = worldH;
+    m_bgImageReady  = true;
+    return true;
+}
+
+bool BackgroundPager::GetBackgroundImage(BackgroundImage& out) const
+{
+    if (!m_bgImageReady || !m_bgImageTex.IsValid())
+        return false;
+
+    out.worldX   = m_bgImageWorldX;
+    out.worldY   = m_bgImageWorldY;
+    out.worldW   = m_bgImageWorldW;
+    out.worldH   = m_bgImageWorldH;
+    out.srvIndex = m_bgImageTex.GetSRVIndex();
+    return true;
 }
 
 uint32_t BackgroundPager::FindOrEvictCacheSlot(const PageKey& key)

@@ -202,8 +202,12 @@ void SceneRenderer::PassBackground(ID3D12GraphicsCommandList* cmdList,
                                     Camera2D& camera,
                                     BackgroundPager& bgPager)
 {
+    // Collect background image + paged background pages
+    BackgroundPager::BackgroundImage bgImage;
+    bool hasBgImage = bgPager.GetBackgroundImage(bgImage);
     auto pages = bgPager.GetVisiblePages();
-    if (pages.empty())
+
+    if (!hasBgImage && pages.empty())
         return;
 
     // Set render target
@@ -230,9 +234,24 @@ void SceneRenderer::PassBackground(ID3D12GraphicsCommandList* cmdList,
 
     cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 
-    // Build instance data for background pages
+    // Build instance data: background image first, then pages
     std::vector<SpriteInstance> instances;
-    instances.reserve(pages.size());
+    instances.reserve((hasBgImage ? 1 : 0) + pages.size());
+
+    if (hasBgImage)
+    {
+        SpriteInstance inst;
+        inst.position = { bgImage.worldX + bgImage.worldW * 0.5f,
+                          bgImage.worldY + bgImage.worldH * 0.5f };
+        inst.size     = { bgImage.worldW, bgImage.worldH };
+        inst.uvRect   = { 0.0f, 0.0f, 1.0f, 1.0f };
+        inst.color    = { 1.0f, 1.0f, 1.0f, 1.0f };
+        inst.rotation = 0.0f;
+        inst.sortY    = 0.0f;
+        inst.textureIndex = bgImage.srvIndex;
+        inst.pad      = 0;
+        instances.push_back(inst);
+    }
 
     for (const auto& page : pages)
     {
@@ -537,7 +556,7 @@ void SceneRenderer::PassUI(ID3D12GraphicsCommandList* cmdList,
     cmdList->RSSetScissorRects(1, &scissor);
 
     cmdList->SetGraphicsRootSignature(m_pso.GetMainRootSig());
-    cmdList->SetPipelineState(m_pso.GetSpritePSO());
+    cmdList->SetPipelineState(m_pso.GetSpriteScreenPSO());
     cmdList->SetGraphicsRootConstantBufferView(0, m_frameCBVAddress);
     cmdList->SetGraphicsRootDescriptorTable(1,
         renderer.GetSRVHeap().GetGPUHandle(0));
@@ -572,6 +591,12 @@ void SceneRenderer::DrawGridOverlay(RendererD3D12& renderer, Camera2D& camera,
                                      const Grid& grid,
                                      float r, float g, float b, float a)
 {
+    if (grid.IsIsometric())
+    {
+        DrawGridOverlayIsometric(renderer, camera, grid, r, g, b, a);
+        return;
+    }
+
     auto* cmdList = renderer.GetCommandList();
 
     // Determine visible tile range
@@ -621,6 +646,52 @@ void SceneRenderer::DrawGridOverlay(RendererD3D12& renderer, Camera2D& camera,
     }
 
     DrawLineOverlay(renderer, verts.data(), verts.size(), r, g, b, a);
+}
+
+void SceneRenderer::DrawGridOverlayIsometric(RendererD3D12& renderer, Camera2D& camera,
+                                              const Grid& grid,
+                                              float r, float g, float b, float a)
+{
+    // For isometric grids, draw diamond outlines for each visible tile.
+    auto vb = camera.GetViewBounds();
+
+    // We need to find all tiles whose diamonds overlap the view.
+    // Conservatively iterate all tiles (the grid is typically small).
+    int gw = grid.GetGridWidth();
+    int gh = grid.GetGridHeight();
+
+    std::vector<DirectX::XMFLOAT2> verts;
+    verts.reserve(static_cast<size_t>(gw) * gh * 8);
+
+    float halfW = grid.GetTileSize() * 0.5f;
+    float halfH = grid.GetTileSize() * 0.25f;
+
+    for (int ty = 0; ty < gh; ++ty)
+    {
+        for (int tx = 0; tx < gw; ++tx)
+        {
+            DirectX::XMFLOAT2 top, right, bottom, left;
+            grid.TileDiamondVertices(tx, ty, top, right, bottom, left);
+
+            // Quick frustum cull: check if diamond AABB overlaps view
+            float minX = left.x;
+            float maxX = right.x;
+            float minY = top.y;
+            float maxY = bottom.y;
+            if (maxX < vb.left || minX > vb.right ||
+                maxY < vb.top || minY > vb.bottom)
+                continue;
+
+            // 4 edges of the diamond
+            verts.push_back(top);    verts.push_back(right);
+            verts.push_back(right);  verts.push_back(bottom);
+            verts.push_back(bottom); verts.push_back(left);
+            verts.push_back(left);   verts.push_back(top);
+        }
+    }
+
+    if (!verts.empty())
+        DrawLineOverlay(renderer, verts.data(), verts.size(), r, g, b, a);
 }
 
 void SceneRenderer::DrawLineOverlay(RendererD3D12& renderer,

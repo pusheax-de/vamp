@@ -33,7 +33,7 @@ namespace vamp
 // File header
 // ---------------------------------------------------------------------------
 static const uint32_t kSceneMagic   = 0x31504D56; // "VMP1" in little-endian
-static const uint32_t kSceneVersion = 1;
+static const uint32_t kSceneVersion = 2;
 
 struct SceneHeader
 {
@@ -200,6 +200,23 @@ struct SceneRoof
 };
 
 // ---------------------------------------------------------------------------
+// Placed object covering a bounding box of tiles (e.g. hangar, building)
+// ---------------------------------------------------------------------------
+enum class SceneObjectType : uint8_t
+{
+    Hangar,
+    COUNT
+};
+
+struct SceneObject
+{
+    SceneObjectType type    = SceneObjectType::Hangar;
+    int32_t         x0 = 0, y0 = 0, x1 = 0, y1 = 0; // Tile bounding box
+    char            imagePath[128] = {};               // Relative path to PNG
+    char            tag[32]        = {};
+};
+
+// ---------------------------------------------------------------------------
 // SceneData - the complete in-memory representation of a .vmp scene
 // ---------------------------------------------------------------------------
 struct SceneData
@@ -212,6 +229,9 @@ struct SceneData
     // Background pages
     std::vector<SceneBackgroundPage> backgroundPages;
 
+    // Background image (single image covering the level, relative path to PNG)
+    std::string                     backgroundImagePath;
+
     // Player spawn
     int32_t                         playerSpawnX = 0;
     int32_t                         playerSpawnY = 0;
@@ -223,6 +243,9 @@ struct SceneData
     // World items
     std::vector<SceneGroundItem>    groundItems;
     std::vector<SceneQuestItem>     questItems;
+
+    // Placed objects (hangars, buildings, etc.)
+    std::vector<SceneObject>        objects;
 
     // Zones
     std::vector<SceneTrigger>       triggers;

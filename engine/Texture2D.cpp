@@ -6,6 +6,8 @@
 #include <cassert>
 #include <fstream>
 #include <vector>
+#include <wincodec.h>
+#pragma comment(lib, "windowscodecs.lib")
 
 namespace engine
 {
@@ -286,6 +288,96 @@ bool Texture2D::LoadFromDDS(ID3D12Device* device,
                                       srvHeap.GetCPUHandle(m_srvIndex));
 
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// LoadFromPNG
+// ---------------------------------------------------------------------------
+bool Texture2D::LoadFromPNG(ID3D12Device* device,
+                             ID3D12GraphicsCommandList* cmdList,
+                             UploadManager& uploadMgr,
+                             PersistentDescriptorAllocator& srvHeap,
+                             const std::wstring& filePath)
+{
+    // Use WIC to decode PNG to RGBA8
+    IWICImagingFactory* wicFactory = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr,
+                                   CLSCTX_INPROC_SERVER,
+                                   IID_PPV_ARGS(&wicFactory));
+    if (FAILED(hr))
+    {
+        // COM may not be initialized yet; try initializing it
+        CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr,
+                               CLSCTX_INPROC_SERVER,
+                               IID_PPV_ARGS(&wicFactory));
+        if (FAILED(hr))
+            return false;
+    }
+
+    IWICBitmapDecoder* decoder = nullptr;
+    hr = wicFactory->CreateDecoderFromFilename(filePath.c_str(), nullptr,
+                                                GENERIC_READ,
+                                                WICDecodeMetadataCacheOnLoad,
+                                                &decoder);
+    if (FAILED(hr))
+    {
+        wicFactory->Release();
+        return false;
+    }
+
+    IWICBitmapFrameDecode* frame = nullptr;
+    hr = decoder->GetFrame(0, &frame);
+    if (FAILED(hr))
+    {
+        decoder->Release();
+        wicFactory->Release();
+        return false;
+    }
+
+    UINT imgWidth = 0, imgHeight = 0;
+    frame->GetSize(&imgWidth, &imgHeight);
+
+    // Convert to RGBA8
+    IWICFormatConverter* converter = nullptr;
+    hr = wicFactory->CreateFormatConverter(&converter);
+    if (FAILED(hr))
+    {
+        frame->Release();
+        decoder->Release();
+        wicFactory->Release();
+        return false;
+    }
+
+    hr = converter->Initialize(frame, GUID_WICPixelFormat32bppRGBA,
+                                WICBitmapDitherTypeNone, nullptr, 0.0,
+                                WICBitmapPaletteTypeCustom);
+    if (FAILED(hr))
+    {
+        converter->Release();
+        frame->Release();
+        decoder->Release();
+        wicFactory->Release();
+        return false;
+    }
+
+    // Read pixels
+    uint32_t rowPitch = imgWidth * 4;
+    std::vector<uint8_t> pixels(static_cast<size_t>(rowPitch) * imgHeight);
+    hr = converter->CopyPixels(nullptr, rowPitch, static_cast<UINT>(pixels.size()),
+                                pixels.data());
+
+    converter->Release();
+    frame->Release();
+    decoder->Release();
+    wicFactory->Release();
+
+    if (FAILED(hr))
+        return false;
+
+    // Use the existing RGBA upload path
+    return CreateFromRGBA(device, cmdList, uploadMgr, srvHeap,
+                           imgWidth, imgHeight, pixels.data());
 }
 
 // ---------------------------------------------------------------------------

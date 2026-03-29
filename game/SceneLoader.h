@@ -140,7 +140,7 @@ private:
     int         m_devSpawnY    = 0;
 
     // Populate engine occluders from tile grid
-    void BuildOccluders(engine::OccluderSet& occluders) const;
+    void BuildOccluders(engine::OccluderSet& occluders, const engine::Grid& grid) const;
 
     // Populate engine lights from scene data
     void BuildLights(engine::LightSystem& lights) const;

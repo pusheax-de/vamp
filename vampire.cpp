@@ -6,6 +6,8 @@
 #include "engine/Engine.h"
 #include "game/SceneLoader.h"
 #include "game/GenerateTestScene.h"
+#include "editor/EditorMode.h"
+#include "ui/UI.h"
 #include <string>
 #include <sstream>
 #include <cmath>
@@ -34,11 +36,23 @@ static engine::InputSystem     g_input;
 static bool                    g_engineInitialized = false;
 static float                   g_time = 0.0f;
 
+// Background image loading state
+static bool                    g_bgImagePending = false;
+static std::wstring            g_bgImagePath;
+
 // Developer mode flag
 static bool                    g_devMode = true;
 
+// Editor mode
+static bool                    g_editorMode = false;
+static EditorState             g_editorState;
+
 // Scene loader
 static vamp::SceneLoader       g_sceneLoader;
+
+// UI system
+static ui::UISystem            g_uiSystem;
+static bool                    g_uiInitialized = false;
 
 // High-resolution timer
 static LARGE_INTEGER            g_timerFreq;
@@ -54,6 +68,9 @@ static float                   g_playerWorldY = 0.0f;
 // Debug overlay toggles
 static bool                    g_showGrid = false;
 static bool                    g_showWalls = false;
+
+// Scene path (for editor saving)
+static std::string             g_scenePath;
 
 // Forward declarations
 ATOM                MyRegisterClass(HINSTANCE hInstance);
@@ -75,7 +92,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_ int       nCmdShow)
 {
     UNREFERENCED_PARAMETER(hPrevInstance);
-    UNREFERENCED_PARAMETER(lpCmdLine);
+
+    // Check for --editor flag
+    if (lpCmdLine && wcsstr(lpCmdLine, L"--editor"))
+        g_editorMode = true;
 
     LoadStringW(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
     LoadStringW(hInstance, IDC_VAMPIRE, szWindowClass, MAX_LOADSTRING);
@@ -106,7 +126,16 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         {
             // Render a frame when no messages pending
             if (g_engineInitialized)
-                RenderFrame();
+            {
+                if (g_editorMode)
+                    EditorFrame(g_renderer, g_sceneRenderer, g_camera, g_grid,
+                                g_bgPager, g_renderQueue, g_lights, g_occluders,
+                                g_fog, g_roofs, g_input, g_sceneLoader,
+                                g_editorState, g_uiSystem, g_hWnd, g_time,
+                                g_timerFreq, g_timerLast);
+                else
+                    RenderFrame();
+            }
         }
     }
 
@@ -204,7 +233,7 @@ bool InitEngine(HWND hwnd, uint32_t width, uint32_t height)
     }
 
     std::string scenesDir = exeDir + "scenes\\";
-    std::string scenePath = scenesDir + "test.vmp";
+    g_scenePath = scenesDir + "test.vmp";
 
     // Create scenes directory if it doesn't exist
     CreateDirectoryA(scenesDir.c_str(), nullptr);
@@ -212,12 +241,19 @@ bool InitEngine(HWND hwnd, uint32_t width, uint32_t height)
     // Auto-generate test scene if it doesn't exist
     {
         struct stat st;
-        if (stat(scenePath.c_str(), &st) != 0)
+        bool needsRegen = (stat(g_scenePath.c_str(), &st) != 0);
+
+        // Always regenerate in dev mode to pick up scene format changes
+        // but NOT in editor mode (preserve manual edits)
+        if (g_devMode && !g_editorMode)
+            needsRegen = true;
+
+        if (needsRegen)
         {
             OutputDebugStringA("[Vampire] Generating test scene: ");
-            OutputDebugStringA(scenePath.c_str());
+            OutputDebugStringA(g_scenePath.c_str());
             OutputDebugStringA("\n");
-            if (vamp::GenerateTestScene(scenePath))
+            if (vamp::GenerateTestScene(g_scenePath))
                 OutputDebugStringA("[Vampire] Test scene generated successfully.\n");
             else
                 OutputDebugStringA("[Vampire] ERROR: Failed to generate test scene!\n");
@@ -228,7 +264,7 @@ bool InitEngine(HWND hwnd, uint32_t width, uint32_t height)
     if (g_devMode)
         g_sceneLoader.SetDevModeSpawn(true, 15, 15); // Center of test map
 
-    if (g_sceneLoader.LoadScene(scenePath, g_grid, g_occluders, g_lights,
+    if (g_sceneLoader.LoadScene(g_scenePath, g_grid, g_occluders, g_lights,
                                  g_fog, g_roofs, g_camera))
     {
         OutputDebugStringA("[Vampire] Loaded scene: ");
@@ -238,6 +274,29 @@ bool InitEngine(HWND hwnd, uint32_t width, uint32_t height)
         // Set player position from camera (which was set to spawn point by LoadScene)
         g_playerWorldX = g_camera.GetWorldX();
         g_playerWorldY = g_camera.GetWorldY();
+
+        // Queue background image load if specified in scene data
+        const auto& bgPath = g_sceneLoader.GetSceneData().backgroundImagePath;
+        if (!bgPath.empty())
+        {
+            // Resolve relative path against exe directory
+            std::wstring wideBgPath(bgPath.begin(), bgPath.end());
+            std::wstring wExeDir;
+            {
+                wchar_t buf[MAX_PATH];
+                GetModuleFileNameW(nullptr, buf, MAX_PATH);
+                wExeDir = buf;
+                size_t sl = wExeDir.find_last_of(L"\\/");
+                if (sl != std::wstring::npos)
+                    wExeDir = wExeDir.substr(0, sl + 1);
+            }
+            g_bgImagePath = wExeDir + wideBgPath;
+            g_bgImagePending = true;
+
+            OutputDebugStringA("[Vampire] Background image queued: ");
+            OutputDebugStringA(bgPath.c_str());
+            OutputDebugStringA("\n");
+        }
 
         if (g_devMode)
         {
@@ -257,6 +316,7 @@ bool InitEngine(HWND hwnd, uint32_t width, uint32_t height)
         // No scene file -- set up a default empty grid for testing
         OutputDebugStringA("[Vampire] No scene found, using default empty grid.\n");
         g_grid.Init(32.0f, 64, 64, -1024.0f, -1024.0f);
+        g_grid.SetIsometric(true);
 
         engine::SceneRendererConfig fogConfig;
         fogConfig.SetFromFullRes(width, height);
@@ -275,10 +335,68 @@ bool InitEngine(HWND hwnd, uint32_t width, uint32_t height)
     g_input.SetCameraPanSpeed(600.0f);
     g_input.SetZoomRange(0.25f, 4.0f);
     g_input.SetZoomSensitivity(0.15f);
-    g_input.SetEdgeScrollEnabled(false);
-    g_input.SetKeyboardPanEnabled(false);
+
+    if (g_editorMode)
+    {
+        // Editor: WASD pans camera, no edge scroll (use RMB drag instead)
+        g_input.SetEdgeScrollEnabled(false);
+        g_input.SetKeyboardPanEnabled(true);
+
+        // Initialize editor state
+        g_editorState.active    = true;
+        g_editorState.scenePath = g_scenePath;
+
+        OutputDebugStringA("[Vampire] EDITOR MODE active.\n");
+    }
+    else
+    {
+        g_input.SetEdgeScrollEnabled(false);
+        g_input.SetKeyboardPanEnabled(false);
+    }
 
     g_engineInitialized = true;
+
+    // Initialize UI system (needs a BeginFrame/EndFrame for the command list)
+    g_renderer.BeginFrame();
+    if (g_uiSystem.Init(g_renderer.GetDevice(), g_renderer.GetCommandList(),
+                         g_renderer.GetUploadManager(), g_renderer.GetSRVHeap()))
+    {
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        g_uiSystem.SetScreenSize(static_cast<uint32_t>(rc.right - rc.left),
+                                  static_cast<uint32_t>(rc.bottom - rc.top));
+
+        if (g_editorMode)
+        {
+            // Editor overlay: hover info, tile details, hotkey hints
+            EditorInitUI(g_uiSystem, g_editorState);
+        }
+        else
+        {
+            // Gameplay: bottom HUD bar with stats
+            auto* hud = g_uiSystem.CreatePanel(nullptr, "hud",
+                                                0, -4, 400, 40,
+                                                { 0.12f, 0.10f, 0.10f, 0.85f },
+                                                ui::Anchor::BottomCenter);
+            hud->SetBorderColor({ 0.5f, 0.05f, 0.05f, 0.8f });
+            hud->SetBorderWidth(1.0f);
+
+            g_uiSystem.CreateLabel(hud, "hp_label",
+                                   "HP: 14/14  |  AP: 8  |  BR: 4/6",
+                                   8, 0, 384, 40,
+                                   ui::Color::White(),
+                                   ui::TextAlign::Center);
+        }
+
+        g_uiInitialized = true;
+    }
+
+    // Submit the command list so font textures are uploaded
+    g_renderer.GetCommandList()->Close();
+    ID3D12CommandList* initLists[] = { g_renderer.GetCommandList() };
+    g_renderer.GetCommandQueue()->ExecuteCommandLists(1, initLists);
+    g_renderer.WaitForGPU();
+
     return true;
 }
 
@@ -288,6 +406,13 @@ void ShutdownEngine()
     {
         g_sceneLoader.UnloadScene();
         g_renderer.WaitForGPU();
+        if (g_editorMode)
+            g_editorState.ShutdownTextures(g_renderer.GetSRVHeap());
+        if (g_uiInitialized)
+        {
+            g_uiSystem.Shutdown(g_renderer.GetSRVHeap());
+            g_uiInitialized = false;
+        }
         if (g_playerIndicatorReady)
         {
             g_playerIndicatorTex.Shutdown(g_renderer.GetSRVHeap());
@@ -575,6 +700,30 @@ void RenderFrame()
     if (!g_playerIndicatorReady)
         CreatePlayerIndicator();
 
+    // Load background image if pending (needs active command list)
+    if (g_bgImagePending)
+    {
+        float worldX = g_grid.GetOriginX();
+        float worldY = g_grid.GetOriginY();
+        float worldW = g_grid.GetWorldWidth();
+        float worldH = g_grid.GetWorldHeight();
+
+        if (g_bgPager.SetBackgroundImage(g_renderer.GetDevice(),
+                                          g_renderer.GetCommandList(),
+                                          g_renderer.GetUploadManager(),
+                                          g_renderer.GetSRVHeap(),
+                                          g_bgImagePath,
+                                          worldX, worldY, worldW, worldH))
+        {
+            OutputDebugStringA("[Vampire] Background image loaded successfully.\n");
+        }
+        else
+        {
+            OutputDebugStringA("[Vampire] WARNING: Failed to load background image.\n");
+        }
+        g_bgImagePending = false;
+    }
+
     g_renderQueue.Clear();
 
     // Submit player indicator to render queue
@@ -599,6 +748,15 @@ void RenderFrame()
     g_sceneRenderer.RenderFrame(g_renderer, g_camera, g_bgPager,
                                  g_renderQueue, g_lights, g_occluders,
                                  g_fog, g_roofs, g_time);
+
+    // Render UI overlay
+    if (g_uiInitialized)
+    {
+        g_uiSystem.Update();
+        g_renderer.TransitionBackBufferToRT();
+        g_uiSystem.Render(g_renderer, g_sceneRenderer.GetPipelineStates());
+        g_renderer.TransitionBackBufferToPresent();
+    }
 
     // Draw debug overlays (backbuffer is in PRESENT state after RenderFrame,
     // so transition back to RT for overlays)
@@ -717,51 +875,96 @@ static void DrawWallOverlay()
     const auto& scene = g_sceneLoader.GetSceneData();
     int gridW = scene.header.gridWidth;
     int gridH = scene.header.gridHeight;
-    float ts  = scene.header.tileSize;
-    float ox  = scene.header.originX;
-    float oy  = scene.header.originY;
 
     // Build line segments for wall tile edges
     std::vector<DirectX::XMFLOAT2> verts;
     verts.reserve(gridW * gridH); // rough estimate
 
-    for (int y = 0; y < gridH; ++y)
+    if (g_grid.IsIsometric())
     {
-        for (int x = 0; x < gridW; ++x)
+        // Isometric: draw diamond edges of wall tiles that border non-wall tiles
+        for (int y = 0; y < gridH; ++y)
         {
-            const auto& tile = scene.tiles[y * gridW + x];
-            if (tile.terrain != vamp::TerrainType::Wall)
-                continue;
+            for (int x = 0; x < gridW; ++x)
+            {
+                const auto& tile = scene.tiles[y * gridW + x];
+                if (tile.terrain != vamp::TerrainType::Wall)
+                    continue;
 
-            float left   = ox + x * ts;
-            float top    = oy + y * ts;
-            float right  = left + ts;
-            float bottom = top + ts;
+                DirectX::XMFLOAT2 top, right, bottom, left;
+                g_grid.TileDiamondVertices(x, y, top, right, bottom, left);
 
-            // Draw edges where the wall tile borders a non-wall tile
-            // Top edge
-            if (y == 0 || scene.tiles[(y - 1) * gridW + x].terrain != vamp::TerrainType::Wall)
-            {
-                verts.push_back({ left,  top });
-                verts.push_back({ right, top });
+                // Top-right edge (north neighbor: y-1)
+                if (y == 0 || scene.tiles[(y - 1) * gridW + x].terrain != vamp::TerrainType::Wall)
+                {
+                    verts.push_back(top);
+                    verts.push_back(right);
+                }
+                // Bottom-right edge (east neighbor: x+1)
+                if (x == gridW - 1 || scene.tiles[y * gridW + (x + 1)].terrain != vamp::TerrainType::Wall)
+                {
+                    verts.push_back(right);
+                    verts.push_back(bottom);
+                }
+                // Bottom-left edge (south neighbor: y+1)
+                if (y == gridH - 1 || scene.tiles[(y + 1) * gridW + x].terrain != vamp::TerrainType::Wall)
+                {
+                    verts.push_back(bottom);
+                    verts.push_back(left);
+                }
+                // Top-left edge (west neighbor: x-1)
+                if (x == 0 || scene.tiles[y * gridW + (x - 1)].terrain != vamp::TerrainType::Wall)
+                {
+                    verts.push_back(left);
+                    verts.push_back(top);
+                }
             }
-            // Bottom edge
-            if (y == gridH - 1 || scene.tiles[(y + 1) * gridW + x].terrain != vamp::TerrainType::Wall)
+        }
+    }
+    else
+    {
+        float ts  = scene.header.tileSize;
+        float ox  = scene.header.originX;
+        float oy  = scene.header.originY;
+
+        for (int y = 0; y < gridH; ++y)
+        {
+            for (int x = 0; x < gridW; ++x)
             {
-                verts.push_back({ left,  bottom });
-                verts.push_back({ right, bottom });
-            }
-            // Left edge
-            if (x == 0 || scene.tiles[y * gridW + (x - 1)].terrain != vamp::TerrainType::Wall)
-            {
-                verts.push_back({ left, top });
-                verts.push_back({ left, bottom });
-            }
-            // Right edge
-            if (x == gridW - 1 || scene.tiles[y * gridW + (x + 1)].terrain != vamp::TerrainType::Wall)
-            {
-                verts.push_back({ right, top });
-                verts.push_back({ right, bottom });
+                const auto& tile = scene.tiles[y * gridW + x];
+                if (tile.terrain != vamp::TerrainType::Wall)
+                    continue;
+
+                float left   = ox + x * ts;
+                float top    = oy + y * ts;
+                float right  = left + ts;
+                float bottom = top + ts;
+
+                // Draw edges where the wall tile borders a non-wall tile
+                // Top edge
+                if (y == 0 || scene.tiles[(y - 1) * gridW + x].terrain != vamp::TerrainType::Wall)
+                {
+                    verts.push_back({ left,  top });
+                    verts.push_back({ right, top });
+                }
+                // Bottom edge
+                if (y == gridH - 1 || scene.tiles[(y + 1) * gridW + x].terrain != vamp::TerrainType::Wall)
+                {
+                    verts.push_back({ left,  bottom });
+                    verts.push_back({ right, bottom });
+                }
+                // Left edge
+                if (x == 0 || scene.tiles[y * gridW + (x - 1)].terrain != vamp::TerrainType::Wall)
+                {
+                    verts.push_back({ left, top });
+                    verts.push_back({ left, bottom });
+                }
+                // Right edge
+                if (x == gridW - 1 || scene.tiles[y * gridW + (x + 1)].terrain != vamp::TerrainType::Wall)
+                {
+                    verts.push_back({ right, top });
+                    verts.push_back({ right, bottom });
+                }
             }
         }
     }
@@ -837,6 +1040,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 g_renderer.Resize(w, h);
                 g_sceneRenderer.Resize(g_renderer, w, h);
                 g_camera.SetViewport(w, h);
+                if (g_uiInitialized)
+                    g_uiSystem.SetScreenSize(w, h);
             }
         }
         break;

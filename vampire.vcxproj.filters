@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Game">
@@ -17,6 +17,15 @@
     <Filter Include="Header Files">
       <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
       <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="UI">
+      <UniqueIdentifier>{D4E5F6A7-B8C9-0123-DEFA-234567890123}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="UI\Headers">
+      <UniqueIdentifier>{E5F6A7B8-C9D0-1234-EFAB-345678901234}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="UI\Source">
+      <UniqueIdentifier>{F6A7B8C9-D0E1-2345-FABC-456789012345}</UniqueIdentifier>
     </Filter>
     <Filter Include="Resource Files">
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
@@ -156,6 +165,36 @@
     <ClInclude Include="game\SceneLoader.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="game\GenerateTestScene.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\UI.h">
+      <Filter>UI\Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\UITypes.h">
+      <Filter>UI\Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\BitmapFont.h">
+      <Filter>UI\Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\UIElement.h">
+      <Filter>UI\Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\UIPanel.h">
+      <Filter>UI\Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\UILabel.h">
+      <Filter>UI\Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\UIRenderer.h">
+      <Filter>UI\Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\UISystem.h">
+      <Filter>UI\Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="editor\EditorMode.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="vampire.cpp">
@@ -230,6 +269,21 @@
     <ClCompile Include="game\SceneLoader.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="game\GenerateTestScene.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ui\BitmapFont.cpp">
+      <Filter>UI\Source</Filter>
+    </ClCompile>
+    <ClCompile Include="ui\UIRenderer.cpp">
+      <Filter>UI\Source</Filter>
+    </ClCompile>
+    <ClCompile Include="ui\UISystem.cpp">
+      <Filter>UI\Source</Filter>
+    </ClCompile>
+    <ClCompile Include="editor\EditorMode.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="vampire.rc">
@@ -257,6 +311,11 @@
     <None Include="engine\shaders\LightRadialVS.hlsl" />
     <None Include="engine\shaders\ShadowVolumeVS.hlsl" />
     <None Include="engine\shaders\SpritePS.hlsl" />
+    <None Include="engine\shaders\SpritePointPS.hlsl" />
     <None Include="engine\shaders\SpriteVS.hlsl" />
+    <None Include="AGENTS.md" />
+  </ItemGroup>
+  <ItemGroup>
+    <FxCompile Include="engine\shaders\SpritePointPS.hlsl" />
   </ItemGroup>
 </Project>

@@ -65,6 +65,8 @@ bool PipelineStates::Init(ID3D12Device* device, const std::wstring& shaderDir)
     if (!CreateSamplerHeap(device))             return false;
 
     if (!CreateSpritePSO(device, shaderDir))        return false;
+    if (!CreateSpriteScreenPSO(device, shaderDir))  return false;
+    if (!CreateSpriteScreenPointPSO(device, shaderDir)) return false;
     if (!CreateShadowVolumePSO(device, shaderDir))  return false;
     if (!CreateLightRadialPSO(device, shaderDir))   return false;
     if (!CreateCompositePSO(device, shaderDir))     return false;
@@ -76,6 +78,8 @@ bool PipelineStates::Init(ID3D12Device* device, const std::wstring& shaderDir)
 void PipelineStates::Shutdown()
 {
     m_spritePSO.Reset();
+    m_spriteScreenPSO.Reset();
+    m_spriteScreenPointPSO.Reset();
     m_shadowVolumePSO.Reset();
     m_lightRadialPSO.Reset();
     m_compositePSO.Reset();
@@ -119,20 +123,29 @@ bool PipelineStates::CreateMainRootSignature(ID3D12Device* device)
     rootParams[1].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
 
     // Static sampler: linear wrap at s0
-    D3D12_STATIC_SAMPLER_DESC staticSampler = {};
-    staticSampler.Filter           = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-    staticSampler.AddressU         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-    staticSampler.AddressV         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-    staticSampler.AddressW         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-    staticSampler.ShaderRegister   = 0;
-    staticSampler.RegisterSpace    = 0;
-    staticSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    D3D12_STATIC_SAMPLER_DESC staticSamplers[2] = {};
+
+    staticSamplers[0].Filter           = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    staticSamplers[0].AddressU         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    staticSamplers[0].AddressV         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    staticSamplers[0].AddressW         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    staticSamplers[0].ShaderRegister   = 0;
+    staticSamplers[0].RegisterSpace    = 0;
+    staticSamplers[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    staticSamplers[1].Filter           = D3D12_FILTER_MIN_MAG_MIP_POINT;
+    staticSamplers[1].AddressU         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    staticSamplers[1].AddressV         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    staticSamplers[1].AddressW         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    staticSamplers[1].ShaderRegister   = 1;
+    staticSamplers[1].RegisterSpace    = 0;
+    staticSamplers[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
     D3D12_ROOT_SIGNATURE_DESC desc = {};
     desc.NumParameters     = 2;
     desc.pParameters       = rootParams;
-    desc.NumStaticSamplers = 1;
-    desc.pStaticSamplers   = &staticSampler;
+    desc.NumStaticSamplers = 2;
+    desc.pStaticSamplers   = staticSamplers;
     desc.Flags             = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
     ComPtr<ID3DBlob> sigBlob, errorBlob;
@@ -291,6 +304,102 @@ bool PipelineStates::CreateSpritePSO(ID3D12Device* device, const std::wstring& s
     blend.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 
     return SUCCEEDED(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_spritePSO)));
+}
+
+bool PipelineStates::CreateSpriteScreenPSO(ID3D12Device* device, const std::wstring& shaderDir)
+{
+    // Same as sprite PSO but targeting UNORM backbuffer (for UI / screen-space rendering)
+    auto vs = CompileShader(shaderDir + L"/SpriteVS.hlsl", "main", "vs_5_1");
+    auto ps = CompileShader(shaderDir + L"/SpritePS.hlsl", "main", "ps_5_1");
+    if (!vs || !ps) return false;
+
+    D3D12_INPUT_ELEMENT_DESC inputLayout[] =
+    {
+        { "INST_POS",    0, DXGI_FORMAT_R32G32_FLOAT,       1, 0,  D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+        { "INST_SIZE",   0, DXGI_FORMAT_R32G32_FLOAT,       1, 8,  D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+        { "INST_UVRECT", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 16, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+        { "INST_COLOR",  0, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 32, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+        { "INST_ROT",    0, DXGI_FORMAT_R32_FLOAT,          1, 48, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+        { "INST_SORTY",  0, DXGI_FORMAT_R32_FLOAT,          1, 52, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+        { "INST_TEX",    0, DXGI_FORMAT_R32_UINT,           1, 56, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+        { "INST_PAD",    0, DXGI_FORMAT_R32_UINT,           1, 60, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+    };
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.pRootSignature        = m_mainRootSig.Get();
+    psoDesc.VS                    = { vs->GetBufferPointer(), vs->GetBufferSize() };
+    psoDesc.PS                    = { ps->GetBufferPointer(), ps->GetBufferSize() };
+    psoDesc.InputLayout           = { inputLayout, _countof(inputLayout) };
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets      = 1;
+    psoDesc.RTVFormats[0]         = DXGI_FORMAT_R8G8B8A8_UNORM;
+    psoDesc.SampleDesc            = { 1, 0 };
+    psoDesc.SampleMask            = UINT_MAX;
+    psoDesc.RasterizerState.FillMode              = D3D12_FILL_MODE_SOLID;
+    psoDesc.RasterizerState.CullMode              = D3D12_CULL_MODE_NONE;
+    psoDesc.RasterizerState.DepthClipEnable       = TRUE;
+    psoDesc.DepthStencilState.DepthEnable         = FALSE;
+    psoDesc.DepthStencilState.StencilEnable       = FALSE;
+
+    auto& blend = psoDesc.BlendState.RenderTarget[0];
+    blend.BlendEnable           = TRUE;
+    blend.SrcBlend              = D3D12_BLEND_SRC_ALPHA;
+    blend.DestBlend             = D3D12_BLEND_INV_SRC_ALPHA;
+    blend.BlendOp               = D3D12_BLEND_OP_ADD;
+    blend.SrcBlendAlpha         = D3D12_BLEND_ONE;
+    blend.DestBlendAlpha        = D3D12_BLEND_INV_SRC_ALPHA;
+    blend.BlendOpAlpha          = D3D12_BLEND_OP_ADD;
+    blend.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+    return SUCCEEDED(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_spriteScreenPSO)));
+}
+
+bool PipelineStates::CreateSpriteScreenPointPSO(ID3D12Device* device, const std::wstring& shaderDir)
+{
+    // Same as SpriteScreenPSO but uses SpritePointPS (point-sampled) for crisp UI text
+    auto vs = CompileShader(shaderDir + L"/SpriteVS.hlsl", "main", "vs_5_1");
+    auto ps = CompileShader(shaderDir + L"/SpritePointPS.hlsl", "main", "ps_5_1");
+    if (!vs || !ps) return false;
+
+    D3D12_INPUT_ELEMENT_DESC inputLayout[] =
+    {
+        { "INST_POS",    0, DXGI_FORMAT_R32G32_FLOAT,       1, 0,  D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+        { "INST_SIZE",   0, DXGI_FORMAT_R32G32_FLOAT,       1, 8,  D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+        { "INST_UVRECT", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 16, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+        { "INST_COLOR",  0, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 32, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+        { "INST_ROT",    0, DXGI_FORMAT_R32_FLOAT,          1, 48, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+        { "INST_SORTY",  0, DXGI_FORMAT_R32_FLOAT,          1, 52, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+        { "INST_TEX",    0, DXGI_FORMAT_R32_UINT,           1, 56, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+        { "INST_PAD",    0, DXGI_FORMAT_R32_UINT,           1, 60, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+    };
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.pRootSignature        = m_mainRootSig.Get();
+    psoDesc.VS                    = { vs->GetBufferPointer(), vs->GetBufferSize() };
+    psoDesc.PS                    = { ps->GetBufferPointer(), ps->GetBufferSize() };
+    psoDesc.InputLayout           = { inputLayout, _countof(inputLayout) };
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets      = 1;
+    psoDesc.RTVFormats[0]         = DXGI_FORMAT_R8G8B8A8_UNORM;
+    psoDesc.SampleDesc            = { 1, 0 };
+    psoDesc.SampleMask            = UINT_MAX;
+    psoDesc.RasterizerState.FillMode              = D3D12_FILL_MODE_SOLID;
+    psoDesc.RasterizerState.CullMode              = D3D12_CULL_MODE_NONE;
+    psoDesc.RasterizerState.DepthClipEnable       = TRUE;
+    psoDesc.DepthStencilState.DepthEnable         = FALSE;
+    psoDesc.DepthStencilState.StencilEnable       = FALSE;
+
+    auto& blend = psoDesc.BlendState.RenderTarget[0];
+    blend.BlendEnable           = TRUE;
+    blend.SrcBlend              = D3D12_BLEND_SRC_ALPHA;
+    blend.DestBlend             = D3D12_BLEND_INV_SRC_ALPHA;
+    blend.BlendOp               = D3D12_BLEND_OP_ADD;
+    blend.SrcBlendAlpha         = D3D12_BLEND_ONE;
+    blend.DestBlendAlpha        = D3D12_BLEND_INV_SRC_ALPHA;
+    blend.BlendOpAlpha          = D3D12_BLEND_OP_ADD;
+    blend.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+    return SUCCEEDED(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_spriteScreenPointPSO)));
 }
 
 bool PipelineStates::CreateShadowVolumePSO(ID3D12Device* device, const std::wstring& shaderDir)

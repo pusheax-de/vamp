@@ -38,9 +38,10 @@ bool SceneLoader::LoadScene(const std::string& filePath,
               static_cast<int>(hdr.gridWidth),
               static_cast<int>(hdr.gridHeight),
               hdr.originX, hdr.originY);
+    grid.SetIsometric(true);
 
     // --- Build occluders from tile LoS data ---
-    BuildOccluders(occluders);
+    BuildOccluders(occluders, grid);
 
     // --- Populate lights ---
     BuildLights(lights);
@@ -53,7 +54,7 @@ bool SceneLoader::LoadScene(const std::string& filePath,
     uint32_t fogH = hdr.gridHeight;
     fog.Init(fogW, fogH,
              grid.GetWorldWidth(), grid.GetWorldHeight(),
-             hdr.originX, hdr.originY);
+             grid.GetOriginX(), grid.GetOriginY());
 
     // --- Center camera on player spawn (or dev override) ---
     int spawnX = m_scene.playerSpawnX;
@@ -299,7 +300,7 @@ std::vector<bool> SceneLoader::BuildWalkMap() const
     return map;
 }
 
-void SceneLoader::BuildOccluders(engine::OccluderSet& occluders) const
+void SceneLoader::BuildOccluders(engine::OccluderSet& occluders, const engine::Grid& grid) const
 {
     occluders.Clear();
 
@@ -313,12 +314,22 @@ void SceneLoader::BuildOccluders(engine::OccluderSet& occluders) const
     for (uint32_t i = 0; i < count; ++i)
         losMap[i] = m_scene.tiles[i].blocksLoS ? 1 : 0;
 
-    occluders.BuildFromTileGrid(reinterpret_cast<const bool*>(losMap.data()),
-                                static_cast<int>(w),
-                                static_cast<int>(h),
-                                m_scene.header.tileSize,
-                                m_scene.header.originX,
-                                m_scene.header.originY);
+    if (grid.IsIsometric())
+    {
+        occluders.BuildFromTileGridIsometric(reinterpret_cast<const bool*>(losMap.data()),
+                                              static_cast<int>(w),
+                                              static_cast<int>(h),
+                                              grid);
+    }
+    else
+    {
+        occluders.BuildFromTileGrid(reinterpret_cast<const bool*>(losMap.data()),
+                                    static_cast<int>(w),
+                                    static_cast<int>(h),
+                                    m_scene.header.tileSize,
+                                    m_scene.header.originX,
+                                    m_scene.header.originY);
+    }
 }
 
 void SceneLoader::BuildLights(engine::LightSystem& lights) const

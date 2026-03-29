@@ -146,16 +146,20 @@ public:
         // --- Camera: WASD / arrow-key pan ---
         if (m_keyboardPanEnabled)
         {
-            float panSpeed = m_cameraPanSpeed * deltaTime / camera.GetZoom();
+            bool ctrlHeld = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+            if (!ctrlHeld)
+            {
+                float panSpeed = m_cameraPanSpeed * deltaTime / camera.GetZoom();
 
-            float panX = 0.0f, panY = 0.0f;
-            if (IsKeyDown('W') || IsKeyDown(VK_UP))    panY -= panSpeed;
-            if (IsKeyDown('S') || IsKeyDown(VK_DOWN))   panY += panSpeed;
-            if (IsKeyDown('A') || IsKeyDown(VK_LEFT))   panX -= panSpeed;
-            if (IsKeyDown('D') || IsKeyDown(VK_RIGHT))  panX += panSpeed;
+                float panX = 0.0f, panY = 0.0f;
+                if (IsKeyDown('W') || IsKeyDown(VK_UP))    panY -= panSpeed;
+                if (IsKeyDown('S') || IsKeyDown(VK_DOWN))   panY += panSpeed;
+                if (IsKeyDown('A') || IsKeyDown(VK_LEFT))   panX -= panSpeed;
+                if (IsKeyDown('D') || IsKeyDown(VK_RIGHT))  panX += panSpeed;
 
-            if (panX != 0.0f || panY != 0.0f)
-                camera.SetPosition(camera.GetWorldX() + panX, camera.GetWorldY() + panY);
+                if (panX != 0.0f || panY != 0.0f)
+                    camera.SetPosition(camera.GetWorldX() + panX, camera.GetWorldY() + panY);
+            }
         }
 
         // --- Camera: edge-scroll (mouse near window edge) ---
@@ -178,12 +182,16 @@ public:
         }
 
         // --- Camera: right-mouse-button drag pan ---
-        if (IsMouseDown(MouseButton::Right))
+        if (m_rmbDragEnabled && IsMouseDown(MouseButton::Right))
         {
-            float dx = static_cast<float>(m_mouseDeltaX);
-            float dy = static_cast<float>(m_mouseDeltaY);
-            if (dx != 0.0f || dy != 0.0f)
-                camera.Pan(-dx, -dy);
+            bool shiftHeld = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+            if (!shiftHeld)
+            {
+                float dx = static_cast<float>(m_mouseDeltaX);
+                float dy = static_cast<float>(m_mouseDeltaY);
+                if (dx != 0.0f || dy != 0.0f)
+                    camera.Pan(-dx, -dy);
+            }
         }
 
         // --- Camera: middle-mouse drag pan ---
@@ -298,6 +306,7 @@ public:
     void SetEdgeScrollMargin(int pixels)         { m_edgeScrollMargin  = pixels; }
     void SetEdgeScrollSpeed(float pixelsPerSec)  { m_edgeScrollSpeed   = pixelsPerSec; }
     void SetKeyboardPanEnabled(bool enabled)     { m_keyboardPanEnabled = enabled; }
+    void SetRMBDragEnabled(bool enabled)         { m_rmbDragEnabled = enabled; }
 
 private:
     // Keyboard state
@@ -354,6 +363,9 @@ private:
 
     // Keyboard pan toggle
     bool  m_keyboardPanEnabled = true;
+
+    // RMB drag toggle
+    bool  m_rmbDragEnabled = true;
 
     // Edge-scroll tuning
     bool  m_edgeScrollEnabled = true;

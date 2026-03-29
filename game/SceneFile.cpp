@@ -4,6 +4,7 @@
 //   [SceneHeader]
 //   [uint32 tileCount] [MapTile * tileCount]
 //   [uint32 bgPageCount] [SceneBackgroundPage * count]
+//   [string backgroundImagePath]
 //   [int32 playerSpawnX] [int32 playerSpawnY]
 //   [uint32 npcCount] [for each: NPC blob]
 //   [uint32 patrolRouteCount] [for each: route blob]
@@ -255,6 +256,9 @@ bool SceneFile::Save(const std::string& filePath, const SceneData& scene)
     for (const auto& page : scene.backgroundPages)
         WriteRaw(f, page);
 
+    // Background image path
+    WriteString(f, scene.backgroundImagePath);
+
     // Player spawn
     WriteRaw(f, scene.playerSpawnX);
     WriteRaw(f, scene.playerSpawnY);
@@ -291,6 +295,12 @@ bool SceneFile::Save(const std::string& filePath, const SceneData& scene)
     WriteRaw(f, giCount);
     for (const auto& gi : scene.groundItems)
         WriteRaw(f, gi);
+
+    // Objects
+    uint32_t objCount = static_cast<uint32_t>(scene.objects.size());
+    WriteRaw(f, objCount);
+    for (const auto& obj : scene.objects)
+        WriteRaw(f, obj);
 
     // Quest items
     uint32_t qiCount = static_cast<uint32_t>(scene.questItems.size());
@@ -380,6 +390,9 @@ bool SceneFile::Load(const std::string& filePath, SceneData& scene)
     for (uint32_t i = 0; i < bgCount; ++i)
         if (!ReadRaw(f, scene.backgroundPages[i])) return false;
 
+    // Background image path
+    if (!ReadString(f, scene.backgroundImagePath)) return false;
+
     // Player spawn
     if (!ReadRaw(f, scene.playerSpawnX)) return false;
     if (!ReadRaw(f, scene.playerSpawnY)) return false;
@@ -421,6 +434,13 @@ bool SceneFile::Load(const std::string& filePath, SceneData& scene)
     scene.groundItems.resize(giCount);
     for (uint32_t i = 0; i < giCount; ++i)
         if (!ReadRaw(f, scene.groundItems[i])) return false;
+
+    // Objects
+    uint32_t objCount = 0;
+    if (!ReadRaw(f, objCount)) return false;
+    scene.objects.resize(objCount);
+    for (uint32_t i = 0; i < objCount; ++i)
+        if (!ReadRaw(f, scene.objects[i])) return false;
 
     // Quest items
     uint32_t qiCount = 0;

@@ -167,6 +167,10 @@ private:
 
     SceneRendererConfig m_config;
     FrameConstants      m_frameConstants;
+
+    // Isometric grid overlay helper
+    void DrawGridOverlayIsometric(RendererD3D12& renderer, Camera2D& camera, const Grid& grid,
+                                   float r, float g, float b, float a);
 };
 
 } // namespace engine

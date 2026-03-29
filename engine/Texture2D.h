@@ -1,5 +1,5 @@
 #pragma once
-// Texture2D.h - GPU texture resource wrapper with DDS loading support
+// Texture2D.h - GPU texture resource wrapper with DDS/PNG loading support
 
 #include "EngineTypes.h"
 #include <d3d12.h>
@@ -29,6 +29,13 @@ public:
 
     // Create from DDS file (BC7/BC3/BC1 compressed)
     bool LoadFromDDS(ID3D12Device* device,
+                     ID3D12GraphicsCommandList* cmdList,
+                     UploadManager& uploadMgr,
+                     PersistentDescriptorAllocator& srvHeap,
+                     const std::wstring& filePath);
+
+    // Create from PNG file (decoded via WIC to RGBA8)
+    bool LoadFromPNG(ID3D12Device* device,
                      ID3D12GraphicsCommandList* cmdList,
                      UploadManager& uploadMgr,
                      PersistentDescriptorAllocator& srvHeap,

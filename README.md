@@ -91,6 +91,15 @@ game/
   Discipline.h / .cpp        8 vampire disciplines
   SocialSystem.h / .cpp      Dialogue, persuasion, deception, empathy
   SleepSystem.h / .cpp       Safehouses, sleep, ambush, feeding
+ui/
+  UI.h                       Master include header for UI system
+  UITypes.h                  Core types: Rect, Color, Anchor, TextAlign
+  BitmapFont.h / .cpp        Runtime font atlas from Windows GDI
+  UIElement.h                Base UI element with tree, layout, hit test
+  UIPanel.h                  Solid-color panel with optional border
+  UILabel.h                  Text element using BitmapFont
+  UIRenderer.h / .cpp        Screen-space quad batching via sprite PSO
+  UISystem.h / .cpp          Root UI manager, element creation helpers
 ```
 
 ## Building

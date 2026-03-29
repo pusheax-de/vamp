@@ -471,11 +471,16 @@ bool GenerateTestScene(const std::string& filePath)
 
     // --- Lights ---
 
-    // World position from tile: OX + (tileX + 0.5) * TILE
+    // World position from tile (isometric):
+    //   halfW = TILE/2, halfH = TILE/4
+    //   cx = OX + (H + tx - ty) * halfW
+    //   cy = OY + (tx + ty) * halfH + halfH
     auto tileWorld = [&](int tx, int ty, float& wx, float& wy)
     {
-        wx = OX + (tx + 0.5f) * TILE;
-        wy = OY + (ty + 0.5f) * TILE;
+        float halfW = TILE * 0.5f;
+        float halfH = TILE * 0.25f;
+        wx = OX + (H + tx - ty) * halfW;
+        wy = OY + (tx + ty) * halfH + halfH;
     };
 
     // Flickering torch at L-corridor entrance
@@ -579,6 +584,9 @@ bool GenerateTestScene(const std::string& filePath)
 
     // --- No background pages (black background) ---
     // scene.backgroundPages is empty
+
+    // --- Background image ---
+    scene.backgroundImagePath = "assets\\hangar\\hangar.png";
 
     // --- Write file ---
     return SceneFile::Save(filePath, scene);

@@ -171,6 +171,15 @@
     <ClInclude Include="game\Weapon.h" />
     <ClInclude Include="Resource.h" />
     <ClInclude Include="targetver.h" />
+    <ClInclude Include="ui\BitmapFont.h" />
+    <ClInclude Include="ui\UI.h" />
+    <ClInclude Include="ui\UIElement.h" />
+    <ClInclude Include="ui\UILabel.h" />
+    <ClInclude Include="ui\UIPanel.h" />
+    <ClInclude Include="ui\UIRenderer.h" />
+    <ClInclude Include="ui\UISystem.h" />
+    <ClInclude Include="ui\UITypes.h" />
+    <ClInclude Include="editor\EditorMode.h" />
     <ClInclude Include="vampire.h" />
   </ItemGroup>
   <ItemGroup>
@@ -198,6 +207,10 @@
     <ClCompile Include="game\SleepSystem.cpp" />
     <ClCompile Include="game\SocialSystem.cpp" />
     <ClCompile Include="game\StatusEffect.cpp" />
+    <ClCompile Include="ui\BitmapFont.cpp" />
+    <ClCompile Include="ui\UIRenderer.cpp" />
+    <ClCompile Include="ui\UISystem.cpp" />
+    <ClCompile Include="editor\EditorMode.cpp" />
     <ClCompile Include="vampire.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -222,6 +235,7 @@
     <None Include="engine\shaders\LightRadialVS.hlsl" />
     <None Include="engine\shaders\ShadowVolumeVS.hlsl" />
     <None Include="engine\shaders\SpritePS.hlsl" />
+    <None Include="engine\shaders\SpritePointPS.hlsl" />
     <None Include="engine\shaders\SpriteVS.hlsl" />
   </ItemGroup>
   <ItemDefinitionGroup>

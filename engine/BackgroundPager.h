@@ -40,6 +40,31 @@ public:
 
     void Shutdown(PersistentDescriptorAllocator& srvHeap);
 
+    // --- Single background image support ---
+
+    // Set a single background image that covers the specified world area.
+    // The image is loaded from a PNG file and stretched to fit the given bounds.
+    // Call after the renderer is initialized and a command list is recording.
+    bool SetBackgroundImage(ID3D12Device* device,
+                            ID3D12GraphicsCommandList* cmdList,
+                            UploadManager& uploadMgr,
+                            PersistentDescriptorAllocator& srvHeap,
+                            const std::wstring& imagePath,
+                            float worldX, float worldY,
+                            float worldW, float worldH);
+
+    // Check if a background image is set
+    bool HasBackgroundImage() const { return m_bgImageReady; }
+
+    // Get background image info for rendering
+    struct BackgroundImage
+    {
+        float       worldX, worldY;
+        float       worldW, worldH;
+        uint32_t    srvIndex;
+    };
+    bool GetBackgroundImage(BackgroundImage& out) const;
+
     // Call each frame: determines which pages need to be loaded/evicted
     void Update(const Camera2D& camera, uint32_t frameNumber);
 
@@ -87,6 +112,14 @@ private:
 
     // Visible pages (determined during Update)
     std::vector<PageKey> m_visibleKeys;
+
+    // Single background image
+    Texture2D   m_bgImageTex;
+    float       m_bgImageWorldX = 0.0f;
+    float       m_bgImageWorldY = 0.0f;
+    float       m_bgImageWorldW = 0.0f;
+    float       m_bgImageWorldH = 0.0f;
+    bool        m_bgImageReady  = false;
 
     uint32_t FindOrEvictCacheSlot(const PageKey& key);
     std::wstring GetPageFilePath(int px, int py) const;

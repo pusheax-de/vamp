@@ -40,6 +40,13 @@ public:
     // Clear the "currently visible" mask (call at start of each vision update)
     void ClearVisible();
 
+    // Mark the entire map as visible (for editor / debug)
+    void SetAllVisible()
+    {
+        std::memset(m_visibleNow.data(), 255, m_visibleNow.size());
+        m_dirty = true;
+    }
+
     // Compute and rasterize visibility from a point into the "visible now" mask
     void ComputeVisibility(float worldX, float worldY, float radius,
                             const OccluderSet& occluders);
