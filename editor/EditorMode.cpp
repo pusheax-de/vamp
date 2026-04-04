@@ -435,11 +435,11 @@ static void EditorUpdateOverlay(EditorState& editor,
         {
         case EditorSelection::Tile:
             ss << "TILE (" << editor.selectedTiles.size() << " sel) "
-               << "F=Floor T=Street R=Rubble W=Water L=Wall D=Door M=Metro H=Shadow";
+               << "Use dropdown or: F=Floor T=Street R=Rubble W=Water L=Wall D=Door M=Metro H=Shadow";
             break;
         case EditorSelection::Item:
             ss << "ITEM (" << editor.selectedTiles.size() << " sel) "
-               << "1=Hangar B=Bandage S=Stim A=Antidote F=Flash V=Vial DEL=Remove";
+               << "Use dropdown or: 1=Hangar B=Bandage S=Stim A=Antidote F=Flash V=Vial DEL=Remove";
             break;
         default:
             ss << "LMB=Select Tile  RMB=Select Item  Ctrl+S=Save";
@@ -537,6 +537,213 @@ void EditorInitUI(ui::UISystem& uiSystem, EditorState& editor)
         panel, "editor_hints", "",
         pad, pad + lineH * 2.0f, panelW - pad * 2.0f, lineH,
         { 0.7f, 0.7f, 0.7f, 1.0f }, ui::TextAlign::Left);
+
+    // --- Terrain dropdown (shown when tiles are selected via LMB) ---
+    {
+        std::vector<ui::DropdownItem> terrainItems;
+        terrainItems.push_back({ static_cast<int>(vamp::TerrainType::Floor),      "Floor" });
+        terrainItems.push_back({ static_cast<int>(vamp::TerrainType::Street),     "Street" });
+        terrainItems.push_back({ static_cast<int>(vamp::TerrainType::Rubble),     "Rubble" });
+        terrainItems.push_back({ static_cast<int>(vamp::TerrainType::Water),      "Water" });
+        terrainItems.push_back({ static_cast<int>(vamp::TerrainType::Wall),       "Wall" });
+        terrainItems.push_back({ static_cast<int>(vamp::TerrainType::Door),       "Door" });
+        terrainItems.push_back({ static_cast<int>(vamp::TerrainType::MetroTrack), "Metro Track" });
+        terrainItems.push_back({ static_cast<int>(vamp::TerrainType::Shadow),     "Shadow" });
+
+        editor.terrainDropdown = uiSystem.CreateDropdown(
+            nullptr, "editor_terrain_dd",
+            pad, panelH + pad * 3.0f, 200.0f,
+            terrainItems, ui::Anchor::TopLeft);
+        editor.terrainDropdown->SetPlaceholder("Set Terrain...");
+        editor.terrainDropdown->SetVisible(false);
+    }
+
+    // --- Item dropdown (shown when tiles are selected via RMB) ---
+    {
+        std::vector<ui::DropdownItem> itemItems;
+        // Object placements (IDs 1000+)
+        itemItems.push_back({ 1000, "Hangar (Object)" });
+        // Consumables (IDs 2000+)
+        itemItems.push_back({ 2000 + static_cast<int>(vamp::ConsumableType::Bandage),   "Bandage" });
+        itemItems.push_back({ 2000 + static_cast<int>(vamp::ConsumableType::Stimpack),  "Stimpack" });
+        itemItems.push_back({ 2000 + static_cast<int>(vamp::ConsumableType::Antidote),  "Antidote" });
+        itemItems.push_back({ 2000 + static_cast<int>(vamp::ConsumableType::Flashbang), "Flashbang" });
+        itemItems.push_back({ 2000 + static_cast<int>(vamp::ConsumableType::BloodVial), "Blood Vial" });
+        // Delete action
+        itemItems.push_back({ 9999, "[Delete Item/Object]" });
+
+        editor.itemDropdown = uiSystem.CreateDropdown(
+            nullptr, "editor_item_dd",
+            pad, panelH + pad * 3.0f, 200.0f,
+            itemItems, ui::Anchor::TopLeft);
+        editor.itemDropdown->SetPlaceholder("Place Item...");
+        editor.itemDropdown->SetVisible(false);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Apply terrain from dropdown selection
+// ---------------------------------------------------------------------------
+static void ApplyTerrainFromDropdown(int terrainId,
+                                      vamp::SceneData& scene,
+                                      EditorState& editor,
+                                      vamp::SceneLoader& sceneLoader,
+                                      engine::OccluderSet& occluders,
+                                      const engine::Grid& grid)
+{
+    vamp::TerrainType type = static_cast<vamp::TerrainType>(terrainId);
+    bool losChanged = false;
+    int applied = 0;
+
+    for (const auto& tc : editor.selectedTiles)
+    {
+        if (!scene.InBounds(tc.x, tc.y))
+            continue;
+
+        bool oldBlocksLoS = scene.TileAt(tc.x, tc.y).blocksLoS;
+        scene.TileAt(tc.x, tc.y) = MakeTile(type);
+        bool newBlocksLoS = MakeTile(type).blocksLoS;
+        if (oldBlocksLoS != newBlocksLoS)
+            losChanged = true;
+        ++applied;
+    }
+
+    if (applied > 0)
+    {
+        editor.dirty = true;
+
+        if (losChanged)
+        {
+            RebuildOccluders(sceneLoader, scene, occluders, grid);
+            OutputDebugStringA("[Editor] Occluders rebuilt.\n");
+        }
+
+        std::ostringstream ss;
+        ss << "[Editor] " << applied << " tile(s) -> "
+           << EditorTerrainName(type) << " (dropdown)\n";
+        OutputDebugStringA(ss.str().c_str());
+    }
+
+    editor.ClearSelection();
+}
+
+// ---------------------------------------------------------------------------
+// Apply item placement from dropdown selection
+// ---------------------------------------------------------------------------
+static void ApplyItemFromDropdown(int itemId,
+                                   vamp::SceneData& scene,
+                                   EditorState& editor)
+{
+    // Delete action
+    if (itemId == 9999)
+    {
+        int deleted = 0;
+        for (const auto& tc : editor.selectedTiles)
+        {
+            auto& items = scene.groundItems;
+            auto it = std::find_if(items.begin(), items.end(),
+                [&tc](const vamp::SceneGroundItem& gi) {
+                    return gi.tileX == tc.x && gi.tileY == tc.y;
+                });
+            if (it != items.end())
+            {
+                items.erase(it);
+                ++deleted;
+            }
+
+            auto& objs = scene.objects;
+            auto oit = std::find_if(objs.begin(), objs.end(),
+                [&tc](const vamp::SceneObject& obj) {
+                    return tc.x >= obj.x0 && tc.x <= obj.x1 &&
+                           tc.y >= obj.y0 && tc.y <= obj.y1;
+                });
+            if (oit != objs.end())
+            {
+                objs.erase(oit);
+                ++deleted;
+            }
+        }
+
+        if (deleted > 0)
+        {
+            editor.dirty = true;
+            std::ostringstream ss;
+            ss << "[Editor] Deleted " << deleted << " item(s)/object(s) (dropdown)\n";
+            OutputDebugStringA(ss.str().c_str());
+        }
+        editor.ClearSelection();
+        return;
+    }
+
+    // Hangar object
+    if (itemId == 1000 && !editor.selectedTiles.empty())
+    {
+        int minX = editor.selectedTiles[0].x, maxX = minX;
+        int minY = editor.selectedTiles[0].y, maxY = minY;
+        for (const auto& tc : editor.selectedTiles)
+        {
+            if (tc.x < minX) minX = tc.x;
+            if (tc.x > maxX) maxX = tc.x;
+            if (tc.y < minY) minY = tc.y;
+            if (tc.y > maxY) maxY = tc.y;
+        }
+
+        vamp::SceneObject obj;
+        obj.type = vamp::SceneObjectType::Hangar;
+        obj.x0   = minX;
+        obj.y0   = minY;
+        obj.x1   = maxX;
+        obj.y1   = maxY;
+        {
+            std::memset(obj.imagePath, 0, sizeof(obj.imagePath));
+            const char* path = "assets\\hangar\\hangar.png";
+            size_t len = std::strlen(path);
+            if (len >= sizeof(obj.imagePath)) len = sizeof(obj.imagePath) - 1;
+            std::memcpy(obj.imagePath, path, len);
+        }
+        std::memset(obj.tag, 0, sizeof(obj.tag));
+        scene.objects.push_back(obj);
+
+        editor.dirty = true;
+        std::ostringstream ss;
+        ss << "[Editor] Placed Hangar at [" << minX << "," << minY
+           << "]-[" << maxX << "," << maxY << "] (dropdown)\n";
+        OutputDebugStringA(ss.str().c_str());
+
+        editor.ClearSelection();
+        return;
+    }
+
+    // Consumable placement (IDs 2000+)
+    if (itemId >= 2000 && itemId < 3000)
+    {
+        vamp::ConsumableType ctype = static_cast<vamp::ConsumableType>(itemId - 2000);
+        int placed = 0;
+        for (const auto& tc : editor.selectedTiles)
+        {
+            vamp::SceneGroundItem gi;
+            gi.tileX      = tc.x;
+            gi.tileY      = tc.y;
+            gi.type       = vamp::ItemType::Consumable;
+            gi.templateId = static_cast<uint16_t>(ctype);
+            gi.quantity   = 1;
+            scene.groundItems.push_back(gi);
+            ++placed;
+        }
+
+        if (placed > 0)
+        {
+            editor.dirty = true;
+            const auto& data = vamp::GetConsumableData(ctype);
+            std::ostringstream ss;
+            ss << "[Editor] Placed " << data.name << " at "
+               << placed << " tile(s) (dropdown)\n";
+            OutputDebugStringA(ss.str().c_str());
+        }
+
+        editor.ClearSelection();
+        return;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -659,6 +866,97 @@ void EditorFrame(engine::RendererD3D12& renderer,
     }
     else if (editor.selection == EditorSelection::Item) {
         HandleItemHotkey(input, sceneLoader.GetSceneData(), editor);
+    }
+
+    // --- Show/hide dropdowns based on selection mode ---
+    {
+        bool anyDropdownOpen = false;
+        if (editor.terrainDropdown)
+        {
+            bool showTerrain = (editor.selection == EditorSelection::Tile);
+            editor.terrainDropdown->SetVisible(showTerrain);
+            if (!showTerrain && editor.terrainDropdown->IsOpen())
+                editor.terrainDropdown->Close();
+            editor.terrainDropdown->SetMousePos(
+                static_cast<float>(input.GetMouseX()),
+                static_cast<float>(input.GetMouseY()));
+            if (editor.terrainDropdown->IsOpen())
+                anyDropdownOpen = true;
+        }
+        if (editor.itemDropdown)
+        {
+            bool showItem = (editor.selection == EditorSelection::Item);
+            editor.itemDropdown->SetVisible(showItem);
+            if (!showItem && editor.itemDropdown->IsOpen())
+                editor.itemDropdown->Close();
+            editor.itemDropdown->SetMousePos(
+                static_cast<float>(input.GetMouseX()),
+                static_cast<float>(input.GetMouseY()));
+            if (editor.itemDropdown->IsOpen())
+                anyDropdownOpen = true;
+        }
+
+        // Forward character input to open dropdowns
+        if (anyDropdownOpen && input.HasChar())
+        {
+            uiSystem.HandleChar(input.GetChar());
+            input.ConsumeChar();
+        }
+
+        // Handle dropdown scroll
+        if (anyDropdownOpen && input.GetScrollDelta() != 0.0f)
+        {
+            float mx = static_cast<float>(input.GetMouseX());
+            float my = static_cast<float>(input.GetMouseY());
+            if (editor.terrainDropdown && editor.terrainDropdown->IsOpen())
+                editor.terrainDropdown->HandleScroll(mx, my, input.GetScrollDelta());
+            if (editor.itemDropdown && editor.itemDropdown->IsOpen())
+                editor.itemDropdown->HandleScroll(mx, my, input.GetScrollDelta());
+        }
+
+        // Handle dropdown clicks (LMB press)
+        if (input.IsMousePressed(engine::MouseButton::Left))
+        {
+            float mx = static_cast<float>(input.GetMouseX());
+            float my = static_cast<float>(input.GetMouseY());
+
+            // Pending selection from dropdown callback
+            static int s_pendingTerrainId = -1;
+            static int s_pendingItemId    = -1;
+
+            // Set up one-shot callbacks
+            if (editor.terrainDropdown && editor.terrainDropdown->IsVisible())
+            {
+                editor.terrainDropdown->SetOnSelect(
+                    [](int id, const std::string&) { s_pendingTerrainId = id; });
+                if (editor.terrainDropdown->HandleClick(mx, my))
+                {
+                    if (s_pendingTerrainId >= 0 && sceneLoader.IsLoaded())
+                    {
+                        ApplyTerrainFromDropdown(s_pendingTerrainId,
+                            sceneLoader.GetSceneData(), editor,
+                            sceneLoader, occluders, grid);
+                        editor.terrainDropdown->SetPlaceholder("Set Terrain...");
+                    }
+                    s_pendingTerrainId = -1;
+                }
+            }
+            if (editor.itemDropdown && editor.itemDropdown->IsVisible())
+            {
+                editor.itemDropdown->SetOnSelect(
+                    [](int id, const std::string&) { s_pendingItemId = id; });
+                if (editor.itemDropdown->HandleClick(mx, my))
+                {
+                    if (s_pendingItemId >= 0 && sceneLoader.IsLoaded())
+                    {
+                        ApplyItemFromDropdown(s_pendingItemId,
+                            sceneLoader.GetSceneData(), editor);
+                        editor.itemDropdown->SetPlaceholder("Place Item...");
+                    }
+                    s_pendingItemId = -1;
+                }
+            }
+        }
     }
 
     // --- Update title bar ---
@@ -799,8 +1097,8 @@ static void EditorSubmitObjects(EditorState& editor,
         float cy = (topLeft.y + botRight.y) * 0.5f;
 
         // Size: span the tile centers plus one full tile of padding
-        float tileW = grid.GetTileSize() * 0.5f;   // half diamond width
-        float tileH = grid.GetTileSize() * 0.25f;  // half diamond height
+        float tileW = grid.GetHalfW();
+        float tileH = grid.GetHalfH();
         float spanX = std::fabs(botRight.x - topLeft.x) + tileW * 2.0f;
         float spanY = std::fabs(botRight.y - topLeft.y) + tileH * 2.0f;
 

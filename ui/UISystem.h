@@ -10,6 +10,7 @@
 #include "BitmapFont.h"
 #include "UIPanel.h"
 #include "UILabel.h"
+#include "UIDropdown.h"
 #include <RendererD3D12.h>
 #include <PipelineStates.h>
 #include <memory>
@@ -62,6 +63,15 @@ public:
                          const Color& textColor = Color::White(),
                          TextAlign align = TextAlign::Left);
 
+    // Convenience: create a dropdown and return a raw pointer
+    UIDropdown* CreateDropdown(UIElement* parent, const std::string& name,
+                               float x, float y, float w,
+                               const std::vector<DropdownItem>& items,
+                               Anchor anchor = Anchor::TopLeft);
+
+    // Forward a WM_CHAR character to any open dropdown
+    void HandleChar(char ch);
+
     // Access the default font
     const BitmapFont* GetDefaultFont() const { return &m_defaultFont; }
 
@@ -71,6 +81,7 @@ private:
     BitmapFont                  m_defaultFont;
     uint32_t                    m_screenWidth  = 1280;
     uint32_t                    m_screenHeight = 720;
+    std::vector<UIDropdown*>    m_dropdowns;    // Tracked for char forwarding
 };
 
 } // namespace ui

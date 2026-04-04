@@ -118,6 +118,14 @@ public:
             m_scrollAccum += static_cast<float>(GET_WHEEL_DELTA_WPARAM(wParam)) / WHEEL_DELTA;
             return true;
 
+        case WM_CHAR:
+            if (wParam < 256)
+            {
+                m_lastChar = static_cast<char>(wParam);
+                m_hasChar  = true;
+            }
+            return true;
+
         default:
             return false;
         }
@@ -261,6 +269,7 @@ public:
     {
         std::memcpy(m_keyDownPrev,   m_keyDown,   sizeof(m_keyDown));
         std::memcpy(m_mouseDownPrev, m_mouseDown,  sizeof(m_mouseDown));
+        m_hasChar = false;
     }
 
     // ----- Keyboard queries -----
@@ -296,6 +305,11 @@ public:
     bool WasTileRightClicked()   const { return m_tileRightClicked; }
     int  GetRightClickTileX()    const { return m_rightClickTileX; }
     int  GetRightClickTileY()    const { return m_rightClickTileY; }
+
+    // Character input (from WM_CHAR)
+    bool HasChar()  const { return m_hasChar; }
+    char GetChar()  const { return m_lastChar; }
+    void ConsumeChar()    { m_hasChar = false; }
 
     // ----- Configuration -----
 
@@ -354,6 +368,10 @@ private:
     int  m_rightClickTileY   = 0;
     int  m_rightClickStartX  = 0;
     int  m_rightClickStartY  = 0;
+
+    // Character input
+    char  m_lastChar = 0;
+    bool  m_hasChar  = false;
 
     // Camera control tuning
     float m_cameraPanSpeed   = 600.0f;  // Pixels per second at zoom=1

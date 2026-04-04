@@ -173,6 +173,7 @@
     <ClInclude Include="targetver.h" />
     <ClInclude Include="ui\BitmapFont.h" />
     <ClInclude Include="ui\UI.h" />
+    <ClInclude Include="ui\UIDropdown.h" />
     <ClInclude Include="ui\UIElement.h" />
     <ClInclude Include="ui\UILabel.h" />
     <ClInclude Include="ui\UIPanel.h" />

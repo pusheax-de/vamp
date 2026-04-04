@@ -52,6 +52,10 @@ struct EditorState
     ui::UILabel*            uiTileInfoLabel = nullptr;
     ui::UILabel*            uiHintsLabel    = nullptr;
 
+    // Dropdown selectors (owned by UISystem)
+    ui::UIDropdown*         terrainDropdown = nullptr;
+    ui::UIDropdown*         itemDropdown    = nullptr;
+
     // Object textures (loaded on demand, keyed by SceneObjectType)
     engine::Texture2D   objectTextures[static_cast<int>(vamp::SceneObjectType::COUNT)];
     bool                objectTexturesLoaded[static_cast<int>(vamp::SceneObjectType::COUNT)] = {};

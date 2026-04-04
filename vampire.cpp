@@ -1004,6 +1004,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             case WM_SYSKEYUP:
             case WM_MOUSEMOVE:
             case WM_MOUSEWHEEL:
+            case WM_CHAR:
                 return 0;
             default:
                 break;

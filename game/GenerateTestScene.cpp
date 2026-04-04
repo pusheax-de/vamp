@@ -472,13 +472,13 @@ bool GenerateTestScene(const std::string& filePath)
     // --- Lights ---
 
     // World position from tile (isometric):
-    //   halfW = TILE/2, halfH = TILE/4
+    //   halfW = TILE/2, halfH = TILE/2 / sqrt(3)  (true isometric)
     //   cx = OX + (H + tx - ty) * halfW
     //   cy = OY + (tx + ty) * halfH + halfH
     auto tileWorld = [&](int tx, int ty, float& wx, float& wy)
     {
         float halfW = TILE * 0.5f;
-        float halfH = TILE * 0.25f;
+        float halfH = TILE * 0.5f / 1.7320508f; // true isometric: halfW / sqrt(3)
         wx = OX + (H + tx - ty) * halfW;
         wy = OY + (tx + ty) * halfH + halfH;
     };

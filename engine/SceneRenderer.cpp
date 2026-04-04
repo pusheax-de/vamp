@@ -663,9 +663,6 @@ void SceneRenderer::DrawGridOverlayIsometric(RendererD3D12& renderer, Camera2D& 
     std::vector<DirectX::XMFLOAT2> verts;
     verts.reserve(static_cast<size_t>(gw) * gh * 8);
 
-    float halfW = grid.GetTileSize() * 0.5f;
-    float halfH = grid.GetTileSize() * 0.25f;
-
     for (int ty = 0; ty < gh; ++ty)
     {
         for (int tx = 0; tx < gw; ++tx)

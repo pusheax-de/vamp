@@ -8,5 +8,6 @@
 #include "UIElement.h"
 #include "UIPanel.h"
 #include "UILabel.h"
+#include "UIDropdown.h"
 #include "UIRenderer.h"
 #include "UISystem.h"

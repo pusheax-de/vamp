@@ -131,4 +131,35 @@ UILabel* UISystem::CreateLabel(UIElement* parent, const std::string& name,
     return ptr;
 }
 
+UIDropdown* UISystem::CreateDropdown(UIElement* parent, const std::string& name,
+                                     float x, float y, float w,
+                                     const std::vector<DropdownItem>& items,
+                                     Anchor anchor)
+{
+    auto dropdown = std::unique_ptr<UIDropdown>(new UIDropdown());
+    dropdown->SetName(name);
+    dropdown->SetPosition(x, y);
+    dropdown->SetSize(w, 20.0f); // Height is the closed button row
+    dropdown->SetAnchor(anchor);
+    dropdown->SetFont(&m_defaultFont);
+    dropdown->SetItems(items);
+
+    UIDropdown* ptr = dropdown.get();
+    (parent ? parent : m_root.get())->AddChild(std::move(dropdown));
+    m_dropdowns.push_back(ptr);
+    return ptr;
+}
+
+void UISystem::HandleChar(char ch)
+{
+    for (auto* dd : m_dropdowns)
+    {
+        if (dd && dd->IsVisible() && dd->IsOpen())
+        {
+            dd->HandleChar(ch);
+            return;
+        }
+    }
+}
+
 } // namespace ui
