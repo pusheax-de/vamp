@@ -41,6 +41,11 @@ The project has a working **custom D3D12 rendering engine**, a complete set of *
 - Multiple scenes / scene transitions at runtime
 - Save/load game state
 
+## Blender pipeline
+- Build clean geometry.
+- Render depth, combined, AO.
+- Use stable diffusion + controlNET to generate textured image.
+
 ## RPG System Overview
 
 ### Core Attributes (1-12)
