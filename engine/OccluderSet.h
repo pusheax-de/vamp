@@ -64,7 +64,7 @@ public:
         }
     }
 
-    // Build occluders from a tile grid — isometric mode (diamond edges)
+    // Build occluders from a tile grid — isometric mode (hex edges)
     void BuildFromTileGridIsometric(const bool* blocksLoS, int gridWidth, int gridHeight,
                                      const Grid& grid)
     {
@@ -77,24 +77,23 @@ public:
                 if (!blocksLoS[y * gridWidth + x])
                     continue;
 
-                DirectX::XMFLOAT2 top, right, bottom, left;
-                grid.TileDiamondVertices(x, y, top, right, bottom, left);
+                DirectX::XMFLOAT2 hex[6];
+                grid.TileHexVertices(x, y, hex);
 
-                // North edge (top?right): neighbor y-1
-                if (y == 0 || !blocksLoS[(y - 1) * gridWidth + x])
-                    AddSegment(top.x, top.y, right.x, right.y);
-
-                // East edge (right?bottom): neighbor x+1
-                if (x == gridWidth - 1 || !blocksLoS[y * gridWidth + (x + 1)])
-                    AddSegment(right.x, right.y, bottom.x, bottom.y);
-
-                // South edge (bottom?left): neighbor y+1
-                if (y == gridHeight - 1 || !blocksLoS[(y + 1) * gridWidth + x])
-                    AddSegment(bottom.x, bottom.y, left.x, left.y);
-
-                // West edge (left?top): neighbor x-1
-                if (x == 0 || !blocksLoS[y * gridWidth + (x - 1)])
-                    AddSegment(left.x, left.y, top.x, top.y);
+                for (int edge = 0; edge < 6; ++edge)
+                {
+                    int nx, ny;
+                    Grid::HexNeighbor(x, y, edge, nx, ny);
+                    bool neighborBlocks = (nx >= 0 && nx < gridWidth &&
+                                           ny >= 0 && ny < gridHeight)
+                        && blocksLoS[ny * gridWidth + nx];
+                    if (!neighborBlocks)
+                    {
+                        const auto& a = hex[edge];
+                        const auto& b = hex[(edge + 1) % 6];
+                        AddSegment(a.x, a.y, b.x, b.y);
+                    }
+                }
             }
         }
     }

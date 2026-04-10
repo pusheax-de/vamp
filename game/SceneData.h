@@ -205,6 +205,7 @@ struct SceneRoof
 enum class SceneObjectType : uint8_t
 {
     Hangar,
+    WallVert,
     COUNT
 };
 

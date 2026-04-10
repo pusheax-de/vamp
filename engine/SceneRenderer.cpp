@@ -649,41 +649,41 @@ void SceneRenderer::DrawGridOverlay(RendererD3D12& renderer, Camera2D& camera,
 }
 
 void SceneRenderer::DrawGridOverlayIsometric(RendererD3D12& renderer, Camera2D& camera,
-                                              const Grid& grid,
-                                              float r, float g, float b, float a)
+                                               const Grid& grid,
+                                               float r, float g, float b, float a)
 {
-    // For isometric grids, draw diamond outlines for each visible tile.
+    // For isometric grids, draw hex outlines for each visible tile.
     auto vb = camera.GetViewBounds();
 
-    // We need to find all tiles whose diamonds overlap the view.
     // Conservatively iterate all tiles (the grid is typically small).
     int gw = grid.GetGridWidth();
     int gh = grid.GetGridHeight();
 
     std::vector<DirectX::XMFLOAT2> verts;
-    verts.reserve(static_cast<size_t>(gw) * gh * 8);
+    verts.reserve(static_cast<size_t>(gw) * gh * 12);
 
     for (int ty = 0; ty < gh; ++ty)
     {
         for (int tx = 0; tx < gw; ++tx)
         {
-            DirectX::XMFLOAT2 top, right, bottom, left;
-            grid.TileDiamondVertices(tx, ty, top, right, bottom, left);
+            DirectX::XMFLOAT2 hex[6];
+            grid.TileHexVertices(tx, ty, hex);
 
-            // Quick frustum cull: check if diamond AABB overlaps view
-            float minX = left.x;
-            float maxX = right.x;
-            float minY = top.y;
-            float maxY = bottom.y;
+            // Quick frustum cull: check if hex AABB overlaps view
+            float minX = hex[0].x; // left vertex
+            float maxX = hex[3].x; // right vertex
+            float minY = hex[1].y; // upper-left vertex
+            float maxY = hex[4].y; // lower-right vertex
             if (maxX < vb.left || minX > vb.right ||
                 maxY < vb.top || minY > vb.bottom)
                 continue;
 
-            // 4 edges of the diamond
-            verts.push_back(top);    verts.push_back(right);
-            verts.push_back(right);  verts.push_back(bottom);
-            verts.push_back(bottom); verts.push_back(left);
-            verts.push_back(left);   verts.push_back(top);
+            // 6 edges of the hex
+            for (int i = 0; i < 6; ++i)
+            {
+                verts.push_back(hex[i]);
+                verts.push_back(hex[(i + 1) % 6]);
+            }
         }
     }
 

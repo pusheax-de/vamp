@@ -17,6 +17,12 @@ static void EditorSubmitObjects(EditorState& editor,
                                 const engine::Grid& grid,
                                 engine::RenderQueue& renderQueue,
                                 engine::RendererD3D12& renderer);
+static const char* SceneObjectDisplayName(vamp::SceneObjectType type);
+static void FillObjectImagePath(vamp::SceneObjectType type, char (&imagePath)[128]);
+static bool PlaceSelectedObject(vamp::SceneData& scene,
+                                EditorState& editor,
+                                vamp::SceneObjectType type,
+                                const char* sourceLabel);
 
 // ---------------------------------------------------------------------------
 // Helpers: build a MapTile from terrain type with sensible defaults
@@ -72,6 +78,80 @@ static const char* EditorTerrainName(vamp::TerrainType t)
     case vamp::TerrainType::Shadow:     return "Shadow";
     default:                            return "?";
     }
+}
+
+static const char* SceneObjectDisplayName(vamp::SceneObjectType type)
+{
+    switch (type)
+    {
+    case vamp::SceneObjectType::Hangar:   return "Hangar";
+    case vamp::SceneObjectType::WallVert: return "Wall Vertical";
+    default:                              return "Object";
+    }
+}
+
+static void FillObjectImagePath(vamp::SceneObjectType type, char (&imagePath)[128])
+{
+    std::memset(imagePath, 0, sizeof(imagePath));
+
+    const char* path = "";
+    switch (type)
+    {
+    case vamp::SceneObjectType::Hangar:
+        path = "assets\\hangar\\hangar.png";
+        break;
+    case vamp::SceneObjectType::WallVert:
+        path = "assets\\wall\\wall_vert.png";
+        break;
+    default:
+        break;
+    }
+
+    size_t len = std::strlen(path);
+    if (len >= sizeof(imagePath)) len = sizeof(imagePath) - 1;
+    std::memcpy(imagePath, path, len);
+}
+
+static bool PlaceSelectedObject(vamp::SceneData& scene,
+                                EditorState& editor,
+                                vamp::SceneObjectType type,
+                                const char* sourceLabel)
+{
+    if (editor.selectedTiles.empty())
+        return false;
+
+    int minX = editor.selectedTiles[0].x, maxX = minX;
+    int minY = editor.selectedTiles[0].y, maxY = minY;
+    for (const auto& tc : editor.selectedTiles)
+    {
+        if (tc.x < minX) minX = tc.x;
+        if (tc.x > maxX) maxX = tc.x;
+        if (tc.y < minY) minY = tc.y;
+        if (tc.y > maxY) maxY = tc.y;
+    }
+
+    vamp::SceneObject obj;
+    obj.type = type;
+    obj.x0   = minX;
+    obj.y0   = minY;
+    obj.x1   = maxX;
+    obj.y1   = maxY;
+    FillObjectImagePath(type, obj.imagePath);
+    std::memset(obj.tag, 0, sizeof(obj.tag));
+    scene.objects.push_back(obj);
+
+    editor.dirty = true;
+    std::ostringstream ss;
+    ss << "[Editor] Placed " << SceneObjectDisplayName(type)
+       << " at [" << minX << "," << minY
+       << "]-[" << maxX << "," << maxY << "]";
+    if (sourceLabel && sourceLabel[0])
+        ss << " " << sourceLabel;
+    ss << "\n";
+    OutputDebugStringA(ss.str().c_str());
+
+    editor.ClearSelection();
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -224,43 +304,15 @@ static bool HandleItemHotkey(const engine::InputSystem& input,
         return true;
     }
 
-    // Object placement: 1 = Hangar
+    // Object placement: 1 = Hangar, 2 = Wall Vertical
     if (input.IsKeyPressed('1') && !editor.selectedTiles.empty())
     {
-        // Compute bounding box of all selected tiles
-        int minX = editor.selectedTiles[0].x, maxX = minX;
-        int minY = editor.selectedTiles[0].y, maxY = minY;
-        for (const auto& tc : editor.selectedTiles)
-        {
-            if (tc.x < minX) minX = tc.x;
-            if (tc.x > maxX) maxX = tc.x;
-            if (tc.y < minY) minY = tc.y;
-            if (tc.y > maxY) maxY = tc.y;
-        }
-
-        vamp::SceneObject obj;
-        obj.type = vamp::SceneObjectType::Hangar;
-        obj.x0   = minX;
-        obj.y0   = minY;
-        obj.x1   = maxX;
-        obj.y1   = maxY;
-        {
-            std::memset(obj.imagePath, 0, sizeof(obj.imagePath));
-            const char* path = "assets\\hangar\\hangar.png";
-            size_t len = std::strlen(path);
-            if (len >= sizeof(obj.imagePath)) len = sizeof(obj.imagePath) - 1;
-            std::memcpy(obj.imagePath, path, len);
-        }
-        std::memset(obj.tag, 0, sizeof(obj.tag));
-        scene.objects.push_back(obj);
-
-        editor.dirty = true;
-        std::ostringstream ss;
-        ss << "[Editor] Placed Hangar at [" << minX << "," << minY
-           << "]-[" << maxX << "," << maxY << "]\n";
-        OutputDebugStringA(ss.str().c_str());
-
-        editor.ClearSelection();
+        PlaceSelectedObject(scene, editor, vamp::SceneObjectType::Hangar, "");
+        return true;
+    }
+    if (input.IsKeyPressed('2') && !editor.selectedTiles.empty())
+    {
+        PlaceSelectedObject(scene, editor, vamp::SceneObjectType::WallVert, "");
         return true;
     }
 
@@ -309,7 +361,7 @@ static bool HandleItemHotkey(const engine::InputSystem& input,
 }
 
 // ---------------------------------------------------------------------------
-// Draw selection highlight (diamond outline for each selected tile)
+// Draw selection highlight (hex outline for each selected tile)
 // ---------------------------------------------------------------------------
 static void EditorDrawSelection(engine::SceneRenderer& sceneRenderer,
                                 engine::RendererD3D12& renderer,
@@ -320,20 +372,21 @@ static void EditorDrawSelection(engine::SceneRenderer& sceneRenderer,
         return;
 
     std::vector<DirectX::XMFLOAT2> verts;
-    verts.reserve(editor.selectedTiles.size() * 8);
+    verts.reserve(editor.selectedTiles.size() * 12);
 
     for (const auto& tc : editor.selectedTiles)
     {
         if (!grid.InBounds(tc.x, tc.y))
             continue;
 
-        DirectX::XMFLOAT2 top, right, bottom, left;
-        grid.TileDiamondVertices(tc.x, tc.y, top, right, bottom, left);
+        DirectX::XMFLOAT2 hex[6];
+        grid.TileHexVertices(tc.x, tc.y, hex);
 
-        verts.push_back(top);    verts.push_back(right);
-        verts.push_back(right);  verts.push_back(bottom);
-        verts.push_back(bottom); verts.push_back(left);
-        verts.push_back(left);   verts.push_back(top);
+        for (int i = 0; i < 6; ++i)
+        {
+            verts.push_back(hex[i]);
+            verts.push_back(hex[(i + 1) % 6]);
+        }
     }
 
     if (verts.empty())
@@ -419,7 +472,7 @@ static void EditorUpdateOverlay(EditorState& editor,
                     if (hx >= obj.x0 && hx <= obj.x1 &&
                         hy >= obj.y0 && hy <= obj.y1)
                     {
-                        ss << ", Hangar";
+                        ss << ", " << SceneObjectDisplayName(obj.type);
                     }
                 }
             }
@@ -439,7 +492,7 @@ static void EditorUpdateOverlay(EditorState& editor,
             break;
         case EditorSelection::Item:
             ss << "ITEM (" << editor.selectedTiles.size() << " sel) "
-               << "Use dropdown or: 1=Hangar B=Bandage S=Stim A=Antidote F=Flash V=Vial DEL=Remove";
+               << "Use dropdown or: 1=Hangar 2=WallVert B=Bandage S=Stim A=Antidote F=Flash V=Vial DEL=Remove";
             break;
         default:
             ss << "LMB=Select Tile  RMB=Select Item  Ctrl+S=Save";
@@ -485,17 +538,21 @@ static void EditorDrawWalls(engine::SceneRenderer& sceneRenderer,
             if (scene.tiles[y * gridW + x].terrain != vamp::TerrainType::Wall)
                 continue;
 
-            DirectX::XMFLOAT2 top, right, bottom, left;
-            grid.TileDiamondVertices(x, y, top, right, bottom, left);
+            DirectX::XMFLOAT2 hex[6];
+            grid.TileHexVertices(x, y, hex);
 
-            if (y == 0 || scene.tiles[(y - 1) * gridW + x].terrain != vamp::TerrainType::Wall)
-            { wallVerts.push_back(top); wallVerts.push_back(right); }
-            if (x == gridW - 1 || scene.tiles[y * gridW + (x + 1)].terrain != vamp::TerrainType::Wall)
-            { wallVerts.push_back(right); wallVerts.push_back(bottom); }
-            if (y == gridH - 1 || scene.tiles[(y + 1) * gridW + x].terrain != vamp::TerrainType::Wall)
-            { wallVerts.push_back(bottom); wallVerts.push_back(left); }
-            if (x == 0 || scene.tiles[y * gridW + (x - 1)].terrain != vamp::TerrainType::Wall)
-            { wallVerts.push_back(left); wallVerts.push_back(top); }
+            for (int edge = 0; edge < 6; ++edge)
+            {
+                int nx, ny;
+                engine::Grid::HexNeighbor(x, y, edge, nx, ny);
+                bool neighborIsWall = (nx >= 0 && nx < gridW && ny >= 0 && ny < gridH)
+                    && scene.tiles[ny * gridW + nx].terrain == vamp::TerrainType::Wall;
+                if (!neighborIsWall)
+                {
+                    wallVerts.push_back(hex[edge]);
+                    wallVerts.push_back(hex[(edge + 1) % 6]);
+                }
+            }
         }
     }
 
@@ -563,6 +620,7 @@ void EditorInitUI(ui::UISystem& uiSystem, EditorState& editor)
         std::vector<ui::DropdownItem> itemItems;
         // Object placements (IDs 1000+)
         itemItems.push_back({ 1000, "Hangar (Object)" });
+        itemItems.push_back({ 1001, "Wall Vertical (Object)" });
         // Consumables (IDs 2000+)
         itemItems.push_back({ 2000 + static_cast<int>(vamp::ConsumableType::Bandage),   "Bandage" });
         itemItems.push_back({ 2000 + static_cast<int>(vamp::ConsumableType::Stimpack),  "Stimpack" });
@@ -675,42 +733,15 @@ static void ApplyItemFromDropdown(int itemId,
         return;
     }
 
-    // Hangar object
+    // Object placements
     if (itemId == 1000 && !editor.selectedTiles.empty())
     {
-        int minX = editor.selectedTiles[0].x, maxX = minX;
-        int minY = editor.selectedTiles[0].y, maxY = minY;
-        for (const auto& tc : editor.selectedTiles)
-        {
-            if (tc.x < minX) minX = tc.x;
-            if (tc.x > maxX) maxX = tc.x;
-            if (tc.y < minY) minY = tc.y;
-            if (tc.y > maxY) maxY = tc.y;
-        }
-
-        vamp::SceneObject obj;
-        obj.type = vamp::SceneObjectType::Hangar;
-        obj.x0   = minX;
-        obj.y0   = minY;
-        obj.x1   = maxX;
-        obj.y1   = maxY;
-        {
-            std::memset(obj.imagePath, 0, sizeof(obj.imagePath));
-            const char* path = "assets\\hangar\\hangar.png";
-            size_t len = std::strlen(path);
-            if (len >= sizeof(obj.imagePath)) len = sizeof(obj.imagePath) - 1;
-            std::memcpy(obj.imagePath, path, len);
-        }
-        std::memset(obj.tag, 0, sizeof(obj.tag));
-        scene.objects.push_back(obj);
-
-        editor.dirty = true;
-        std::ostringstream ss;
-        ss << "[Editor] Placed Hangar at [" << minX << "," << minY
-           << "]-[" << maxX << "," << maxY << "] (dropdown)\n";
-        OutputDebugStringA(ss.str().c_str());
-
-        editor.ClearSelection();
+        PlaceSelectedObject(scene, editor, vamp::SceneObjectType::Hangar, "(dropdown)");
+        return;
+    }
+    if (itemId == 1001 && !editor.selectedTiles.empty())
+    {
+        PlaceSelectedObject(scene, editor, vamp::SceneObjectType::WallVert, "(dropdown)");
         return;
     }
 

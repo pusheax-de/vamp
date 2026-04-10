@@ -21,6 +21,7 @@
 //   - 1 roof over the small room
 
 #include "GenerateTestScene.h"
+#include "../engine/Grid.h"
 #include <cstring>
 
 namespace vamp
@@ -471,16 +472,16 @@ bool GenerateTestScene(const std::string& filePath)
 
     // --- Lights ---
 
-    // World position from tile (isometric):
-    //   halfW = TILE/2, halfH = TILE/2 / sqrt(3)  (true isometric)
-    //   cx = OX + (H + tx - ty) * halfW
-    //   cy = OY + (tx + ty) * halfH + halfH
+    engine::Grid layoutGrid;
+    layoutGrid.Init(static_cast<float>(TILE), W, H, OX, OY);
+    layoutGrid.SetIsometric(true);
+
+    // World position from tile using the same projected hex layout as the runtime grid.
     auto tileWorld = [&](int tx, int ty, float& wx, float& wy)
     {
-        float halfW = TILE * 0.5f;
-        float halfH = TILE * 0.5f / 1.7320508f; // true isometric: halfW / sqrt(3)
-        wx = OX + (H + tx - ty) * halfW;
-        wy = OY + (tx + ty) * halfH + halfH;
+        const auto p = layoutGrid.TileToWorld(tx, ty);
+        wx = p.x;
+        wy = p.y;
     };
 
     // Flickering torch at L-corridor entrance

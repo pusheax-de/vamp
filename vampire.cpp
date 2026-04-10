@@ -882,7 +882,7 @@ static void DrawWallOverlay()
 
     if (g_grid.IsIsometric())
     {
-        // Isometric: draw diamond edges of wall tiles that border non-wall tiles
+        // Isometric: draw hex edges of wall tiles that border non-wall tiles
         for (int y = 0; y < gridH; ++y)
         {
             for (int x = 0; x < gridW; ++x)
@@ -891,32 +891,20 @@ static void DrawWallOverlay()
                 if (tile.terrain != vamp::TerrainType::Wall)
                     continue;
 
-                DirectX::XMFLOAT2 top, right, bottom, left;
-                g_grid.TileDiamondVertices(x, y, top, right, bottom, left);
+                DirectX::XMFLOAT2 hex[6];
+                g_grid.TileHexVertices(x, y, hex);
 
-                // Top-right edge (north neighbor: y-1)
-                if (y == 0 || scene.tiles[(y - 1) * gridW + x].terrain != vamp::TerrainType::Wall)
+                for (int edge = 0; edge < 6; ++edge)
                 {
-                    verts.push_back(top);
-                    verts.push_back(right);
-                }
-                // Bottom-right edge (east neighbor: x+1)
-                if (x == gridW - 1 || scene.tiles[y * gridW + (x + 1)].terrain != vamp::TerrainType::Wall)
-                {
-                    verts.push_back(right);
-                    verts.push_back(bottom);
-                }
-                // Bottom-left edge (south neighbor: y+1)
-                if (y == gridH - 1 || scene.tiles[(y + 1) * gridW + x].terrain != vamp::TerrainType::Wall)
-                {
-                    verts.push_back(bottom);
-                    verts.push_back(left);
-                }
-                // Top-left edge (west neighbor: x-1)
-                if (x == 0 || scene.tiles[y * gridW + (x - 1)].terrain != vamp::TerrainType::Wall)
-                {
-                    verts.push_back(left);
-                    verts.push_back(top);
+                    int nx, ny;
+                    engine::Grid::HexNeighbor(x, y, edge, nx, ny);
+                    bool neighborIsWall = (nx >= 0 && nx < gridW && ny >= 0 && ny < gridH)
+                        && scene.tiles[ny * gridW + nx].terrain == vamp::TerrainType::Wall;
+                    if (!neighborIsWall)
+                    {
+                        verts.push_back(hex[edge]);
+                        verts.push_back(hex[(edge + 1) % 6]);
+                    }
                 }
             }
         }
