@@ -241,7 +241,7 @@
   </ItemGroup>
   <ItemDefinitionGroup>
     <PostBuildEvent>
-      <Command>xcopy /Y /I /E "$(ProjectDir)engine\shaders" "$(OutDir)shaders\"</Command>
+      <Command>powershell -ExecutionPolicy Bypass -File "$(ProjectDir)copy_assets.ps1" -ProjectDir "$(ProjectDir)." -OutDir "$(OutDir)."</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
