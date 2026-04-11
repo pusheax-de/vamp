@@ -44,6 +44,12 @@ struct TileCoord
     bool operator==(const TileCoord& o) const { return x == o.x && y == o.y; }
 };
 
+struct EditorShortcutBinding
+{
+    int actionId = -1;
+    int vk = 0;
+};
+
 // ---------------------------------------------------------------------------
 // EditorState - all mutable editor state
 // ---------------------------------------------------------------------------
@@ -60,6 +66,7 @@ struct EditorState
     float                   contextMenuY = 0.0f;
     bool                    dirty           = false;    // Unsaved changes
     std::string             scenePath;                  // Path for Ctrl+S
+    std::string             shortcutConfigPath;         // Path for editor.ini
 
     // UI overlay (owned by UISystem, raw pointers for update)
     ui::UIPanel*            uiPanel         = nullptr;
@@ -70,6 +77,7 @@ struct EditorState
     // Dropdown selectors (owned by UISystem)
     ui::UIDropdown*         terrainDropdown = nullptr;
     ui::UIDropdown*         itemDropdown    = nullptr;
+    std::vector<EditorShortcutBinding> shortcutBindings;
 
     // Terrain textures (loaded on demand, keyed by TerrainType)
     engine::Texture2D   terrainTextures[static_cast<int>(vamp::TerrainType::COUNT)];

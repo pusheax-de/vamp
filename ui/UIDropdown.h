@@ -160,6 +160,27 @@ public:
     // Set the current mouse position for hover highlighting
     void SetMousePos(float px, float py) { m_mouseX = px; m_mouseY = py; }
 
+    int GetHoveredItemId() const
+    {
+        if (!m_open)
+            return -1;
+
+        Rect dropRect = GetDropdownRect();
+        if (!dropRect.Contains(m_mouseX, m_mouseY))
+            return -1;
+
+        float listTop = dropRect.y + m_rowHeight;
+        if (m_mouseY < listTop)
+            return -1;
+
+        int rowIndex = static_cast<int>((m_mouseY - listTop) / m_rowHeight);
+        rowIndex += m_scrollOffset;
+        if (rowIndex < 0 || rowIndex >= static_cast<int>(m_filtered.size()))
+            return -1;
+
+        return m_filtered[rowIndex].id;
+    }
+
 protected:
     void OnRender(UIRenderer& renderer) override
     {

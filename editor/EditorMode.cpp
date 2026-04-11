@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstring>
 #include <cmath>
+#include <fstream>
 
 // Forward declarations
 static void EnsureTerrainTexture(EditorState& editor,
@@ -45,6 +46,22 @@ static std::vector<TilePlacedEntry> GetPlacedEntriesAtTile(const vamp::SceneData
 static void SyncFocusedTileSelection(const vamp::SceneData& scene, EditorState& editor);
 static const char* GroundItemName(const vamp::SceneGroundItem& gi);
 static const char* ContextMenuPageTitle(EditorContextMenuPage page);
+static int GetShortcutForAction(const EditorState& editor, int actionId);
+static void SetShortcutForAction(EditorState& editor, int actionId, int vk);
+static std::string ShortcutKeyName(int vk);
+static int ParseShortcutKeyName(const std::string& text);
+static std::string ContextMenuActionLabel(const EditorState& editor, int actionId, const char* label);
+static bool IsAssignableShortcutAction(int actionId);
+static bool IsAssignableShortcutKey(int vk);
+static int GetFirstPressedAssignableShortcutKey(const engine::InputSystem& input);
+static void SaveShortcutBindings(const EditorState& editor);
+static void LoadShortcutBindings(EditorState& editor);
+static bool ExecuteAssignedShortcut(const engine::InputSystem& input,
+                                    vamp::SceneData& scene,
+                                    EditorState& editor,
+                                    vamp::SceneLoader& sceneLoader,
+                                    engine::OccluderSet& occluders,
+                                    const engine::Grid& grid);
 static void ApplyTerrainFromDropdown(int terrainId,
                                      vamp::SceneData& scene,
                                      EditorState& editor,
@@ -273,6 +290,198 @@ static const char* ContextMenuPageTitle(EditorContextMenuPage page)
     }
 }
 
+static int GetShortcutForAction(const EditorState& editor, int actionId)
+{
+    for (const auto& binding : editor.shortcutBindings)
+    {
+        if (binding.actionId == actionId)
+            return binding.vk;
+    }
+    return 0;
+}
+
+static void SetShortcutForAction(EditorState& editor, int actionId, int vk)
+{
+    editor.shortcutBindings.erase(
+        std::remove_if(editor.shortcutBindings.begin(), editor.shortcutBindings.end(),
+            [actionId, vk](const EditorShortcutBinding& binding)
+            {
+                return binding.actionId == actionId || binding.vk == vk;
+            }),
+        editor.shortcutBindings.end());
+
+    if (actionId >= 0 && vk != 0)
+        editor.shortcutBindings.push_back({ actionId, vk });
+}
+
+static std::string ShortcutKeyName(int vk)
+{
+    if (vk >= '0' && vk <= '9')
+        return std::string(1, static_cast<char>(vk));
+    if (vk >= 'A' && vk <= 'Z')
+        return std::string(1, static_cast<char>(vk));
+    if (vk >= VK_F1 && vk <= VK_F12)
+    {
+        std::ostringstream ss;
+        ss << "F" << (vk - VK_F1 + 1);
+        return ss.str();
+    }
+
+    switch (vk)
+    {
+    case VK_DELETE: return "Del";
+    case VK_INSERT: return "Ins";
+    case VK_HOME:   return "Home";
+    case VK_END:    return "End";
+    case VK_PRIOR:  return "PgUp";
+    case VK_NEXT:   return "PgDn";
+    case VK_SPACE:  return "Space";
+    default:        return "?";
+    }
+}
+
+static int ParseShortcutKeyName(const std::string& text)
+{
+    if (text.size() == 1)
+    {
+        char ch = text[0];
+        if (ch >= 'a' && ch <= 'z')
+            ch = static_cast<char>(ch - 'a' + 'A');
+        if ((ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'Z'))
+            return static_cast<int>(ch);
+    }
+
+    if (text.size() >= 2 &&
+        (text[0] == 'F' || text[0] == 'f'))
+    {
+        int fn = std::atoi(text.c_str() + 1);
+        if (fn >= 1 && fn <= 12)
+            return VK_F1 + fn - 1;
+    }
+
+    if (text == "Del" || text == "Delete")
+        return VK_DELETE;
+    if (text == "Ins" || text == "Insert")
+        return VK_INSERT;
+    if (text == "Home")
+        return VK_HOME;
+    if (text == "End")
+        return VK_END;
+    if (text == "PgUp")
+        return VK_PRIOR;
+    if (text == "PgDn")
+        return VK_NEXT;
+    if (text == "Space")
+        return VK_SPACE;
+
+    return 0;
+}
+
+static std::string ContextMenuActionLabel(const EditorState& editor, int actionId, const char* label)
+{
+    std::string result = label ? label : "";
+    const int shortcut = GetShortcutForAction(editor, actionId);
+    if (shortcut != 0)
+    {
+        result += " [";
+        result += ShortcutKeyName(shortcut);
+        result += "]";
+    }
+    return result;
+}
+
+static bool IsAssignableShortcutAction(int actionId)
+{
+    return actionId >= 0 && actionId != 7099;
+}
+
+static bool IsAssignableShortcutKey(int vk)
+{
+    if (vk >= '0' && vk <= '9')
+        return true;
+    if (vk >= 'A' && vk <= 'Z')
+        return true;
+    if (vk >= VK_F1 && vk <= VK_F12)
+        return true;
+
+    switch (vk)
+    {
+    case VK_DELETE:
+    case VK_INSERT:
+    case VK_HOME:
+    case VK_END:
+    case VK_PRIOR:
+    case VK_NEXT:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static int GetFirstPressedAssignableShortcutKey(const engine::InputSystem& input)
+{
+    for (int vk = 0; vk < 256; ++vk)
+    {
+        if (IsAssignableShortcutKey(vk) && input.IsKeyPressed(vk))
+            return vk;
+    }
+    return 0;
+}
+
+static void SaveShortcutBindings(const EditorState& editor)
+{
+    if (editor.shortcutConfigPath.empty())
+        return;
+
+    std::ofstream out(editor.shortcutConfigPath.c_str(), std::ios::out | std::ios::trunc);
+    if (!out.is_open())
+        return;
+
+    out << "[shortcuts]\n";
+    for (const auto& binding : editor.shortcutBindings)
+        out << binding.actionId << "=" << ShortcutKeyName(binding.vk) << "\n";
+}
+
+static void LoadShortcutBindings(EditorState& editor)
+{
+    editor.shortcutBindings.clear();
+    if (editor.shortcutConfigPath.empty())
+        return;
+
+    std::ifstream in(editor.shortcutConfigPath.c_str());
+    if (!in.is_open())
+        return;
+
+    std::string line;
+    bool inShortcutsSection = false;
+    while (std::getline(in, line))
+    {
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+
+        if (line.empty() || line[0] == ';' || line[0] == '#')
+            continue;
+
+        if (line[0] == '[')
+        {
+            inShortcutsSection = (line == "[shortcuts]");
+            continue;
+        }
+
+        if (!inShortcutsSection)
+            continue;
+
+        const size_t eq = line.find('=');
+        if (eq == std::string::npos)
+            continue;
+
+        const int actionId = std::atoi(line.substr(0, eq).c_str());
+        const int vk = ParseShortcutKeyName(line.substr(eq + 1));
+        if (actionId >= 0 && vk != 0)
+            SetShortcutForAction(editor, actionId, vk);
+    }
+}
+
 static void SyncFocusedTileSelection(const vamp::SceneData& scene, EditorState& editor)
 {
     int tx = 0;
@@ -387,43 +596,43 @@ static void RefreshContextMenuItems(EditorState& editor, const vamp::SceneData& 
     switch (editor.contextMenuPage)
     {
     case EditorContextMenuPage::Root:
-        itemItems.push_back({ 7000, "Ground >" });
-        itemItems.push_back({ 7001, "Place Item >" });
-        itemItems.push_back({ 7002, "Place Object >" });
+        itemItems.push_back({ 7000, ContextMenuActionLabel(editor, 7000, "Ground >") });
+        itemItems.push_back({ 7001, ContextMenuActionLabel(editor, 7001, "Place Item >") });
+        itemItems.push_back({ 7002, ContextMenuActionLabel(editor, 7002, "Place Object >") });
         if (editor.selectedGroundItemOrdinal >= 0 &&
             editor.selectedGroundItemOrdinal < static_cast<int>(groundItems.size()))
-            itemItems.push_back({ 7003, "Selected Item >" });
+            itemItems.push_back({ 7003, ContextMenuActionLabel(editor, 7003, "Selected Item >") });
         if (editor.selectedObjectIndex >= 0 &&
             editor.selectedObjectIndex < static_cast<int>(scene.objects.size()))
-            itemItems.push_back({ 7004, "Selected Object >" });
-        itemItems.push_back({ 9999, "[Delete First Item/Object At Tile]" });
+            itemItems.push_back({ 7004, ContextMenuActionLabel(editor, 7004, "Selected Object >") });
+        itemItems.push_back({ 9999, ContextMenuActionLabel(editor, 9999, "[Delete First Item/Object At Tile]") });
         break;
 
     case EditorContextMenuPage::Ground:
         itemItems.push_back({ 7099, "< Back" });
-        itemItems.push_back({ 5000 + static_cast<int>(vamp::TerrainType::Floor),      "Floor" });
-        itemItems.push_back({ 5000 + static_cast<int>(vamp::TerrainType::Street),     "Street" });
-        itemItems.push_back({ 5000 + static_cast<int>(vamp::TerrainType::Rubble),     "Rubble" });
-        itemItems.push_back({ 5000 + static_cast<int>(vamp::TerrainType::Water),      "Water" });
-        itemItems.push_back({ 5000 + static_cast<int>(vamp::TerrainType::Wall),       "Wall" });
-        itemItems.push_back({ 5000 + static_cast<int>(vamp::TerrainType::Door),       "Door" });
-        itemItems.push_back({ 5000 + static_cast<int>(vamp::TerrainType::MetroTrack), "Metro Track" });
-        itemItems.push_back({ 5000 + static_cast<int>(vamp::TerrainType::Shadow),     "Shadow" });
+        itemItems.push_back({ 5000 + static_cast<int>(vamp::TerrainType::Floor),      ContextMenuActionLabel(editor, 5000 + static_cast<int>(vamp::TerrainType::Floor), "Floor") });
+        itemItems.push_back({ 5000 + static_cast<int>(vamp::TerrainType::Street),     ContextMenuActionLabel(editor, 5000 + static_cast<int>(vamp::TerrainType::Street), "Street") });
+        itemItems.push_back({ 5000 + static_cast<int>(vamp::TerrainType::Rubble),     ContextMenuActionLabel(editor, 5000 + static_cast<int>(vamp::TerrainType::Rubble), "Rubble") });
+        itemItems.push_back({ 5000 + static_cast<int>(vamp::TerrainType::Water),      ContextMenuActionLabel(editor, 5000 + static_cast<int>(vamp::TerrainType::Water), "Water") });
+        itemItems.push_back({ 5000 + static_cast<int>(vamp::TerrainType::Wall),       ContextMenuActionLabel(editor, 5000 + static_cast<int>(vamp::TerrainType::Wall), "Wall") });
+        itemItems.push_back({ 5000 + static_cast<int>(vamp::TerrainType::Door),       ContextMenuActionLabel(editor, 5000 + static_cast<int>(vamp::TerrainType::Door), "Door") });
+        itemItems.push_back({ 5000 + static_cast<int>(vamp::TerrainType::MetroTrack), ContextMenuActionLabel(editor, 5000 + static_cast<int>(vamp::TerrainType::MetroTrack), "Metro Track") });
+        itemItems.push_back({ 5000 + static_cast<int>(vamp::TerrainType::Shadow),     ContextMenuActionLabel(editor, 5000 + static_cast<int>(vamp::TerrainType::Shadow), "Shadow") });
         break;
 
     case EditorContextMenuPage::PlaceItem:
         itemItems.push_back({ 7099, "< Back" });
-        itemItems.push_back({ 2000 + static_cast<int>(vamp::ConsumableType::Bandage),   "Bandage" });
-        itemItems.push_back({ 2000 + static_cast<int>(vamp::ConsumableType::Stimpack),  "Stimpack" });
-        itemItems.push_back({ 2000 + static_cast<int>(vamp::ConsumableType::Antidote),  "Antidote" });
-        itemItems.push_back({ 2000 + static_cast<int>(vamp::ConsumableType::Flashbang), "Flashbang" });
-        itemItems.push_back({ 2000 + static_cast<int>(vamp::ConsumableType::BloodVial), "Blood Vial" });
+        itemItems.push_back({ 2000 + static_cast<int>(vamp::ConsumableType::Bandage),   ContextMenuActionLabel(editor, 2000 + static_cast<int>(vamp::ConsumableType::Bandage), "Bandage") });
+        itemItems.push_back({ 2000 + static_cast<int>(vamp::ConsumableType::Stimpack),  ContextMenuActionLabel(editor, 2000 + static_cast<int>(vamp::ConsumableType::Stimpack), "Stimpack") });
+        itemItems.push_back({ 2000 + static_cast<int>(vamp::ConsumableType::Antidote),  ContextMenuActionLabel(editor, 2000 + static_cast<int>(vamp::ConsumableType::Antidote), "Antidote") });
+        itemItems.push_back({ 2000 + static_cast<int>(vamp::ConsumableType::Flashbang), ContextMenuActionLabel(editor, 2000 + static_cast<int>(vamp::ConsumableType::Flashbang), "Flashbang") });
+        itemItems.push_back({ 2000 + static_cast<int>(vamp::ConsumableType::BloodVial), ContextMenuActionLabel(editor, 2000 + static_cast<int>(vamp::ConsumableType::BloodVial), "Blood Vial") });
         break;
 
     case EditorContextMenuPage::PlaceObject:
         itemItems.push_back({ 7099, "< Back" });
-        itemItems.push_back({ 1000, "Hangar" });
-        itemItems.push_back({ 1001, "Wall Vertical" });
+        itemItems.push_back({ 1000, ContextMenuActionLabel(editor, 1000, "Hangar") });
+        itemItems.push_back({ 1001, ContextMenuActionLabel(editor, 1001, "Wall Vertical") });
         break;
 
     case EditorContextMenuPage::SelectedItem:
@@ -431,8 +640,8 @@ static void RefreshContextMenuItems(EditorState& editor, const vamp::SceneData& 
         if (editor.selectedGroundItemOrdinal >= 0 &&
             editor.selectedGroundItemOrdinal < static_cast<int>(groundItems.size()))
         {
-            itemItems.push_back({ 4000, "Place On Selection" });
-            itemItems.push_back({ 9997, "[Delete Selected Ground Item]" });
+            itemItems.push_back({ 4000, ContextMenuActionLabel(editor, 4000, "Place On Selection") });
+            itemItems.push_back({ 9997, ContextMenuActionLabel(editor, 9997, "[Delete Selected Ground Item]") });
         }
         break;
 
@@ -441,10 +650,10 @@ static void RefreshContextMenuItems(EditorState& editor, const vamp::SceneData& 
         if (editor.selectedObjectIndex >= 0 &&
             editor.selectedObjectIndex < static_cast<int>(scene.objects.size()))
         {
-            itemItems.push_back({ 3000 + static_cast<int>(vamp::SceneObjectPlacement::YMin),    "Placement: Y Min" });
-            itemItems.push_back({ 3000 + static_cast<int>(vamp::SceneObjectPlacement::YMiddle), "Placement: Y Middle" });
-            itemItems.push_back({ 3000 + static_cast<int>(vamp::SceneObjectPlacement::YMax),    "Placement: Y Max" });
-            itemItems.push_back({ 9998, "[Delete Selected Object]" });
+            itemItems.push_back({ 3000 + static_cast<int>(vamp::SceneObjectPlacement::YMin),    ContextMenuActionLabel(editor, 3000 + static_cast<int>(vamp::SceneObjectPlacement::YMin), "Placement: Y Min") });
+            itemItems.push_back({ 3000 + static_cast<int>(vamp::SceneObjectPlacement::YMiddle), ContextMenuActionLabel(editor, 3000 + static_cast<int>(vamp::SceneObjectPlacement::YMiddle), "Placement: Y Middle") });
+            itemItems.push_back({ 3000 + static_cast<int>(vamp::SceneObjectPlacement::YMax),    ContextMenuActionLabel(editor, 3000 + static_cast<int>(vamp::SceneObjectPlacement::YMax), "Placement: Y Max") });
+            itemItems.push_back({ 9998, ContextMenuActionLabel(editor, 9998, "[Delete Selected Object]") });
         }
         break;
     }
@@ -870,6 +1079,8 @@ static void EditorDrawWalls(engine::SceneRenderer& sceneRenderer,
 // ---------------------------------------------------------------------------
 void EditorInitUI(ui::UISystem& uiSystem, EditorState& editor)
 {
+    LoadShortcutBindings(editor);
+
     // Semi-transparent panel in top-left corner
     const float panelW = 620.0f;
     const float lineH  = 20.0f;
@@ -1183,6 +1394,29 @@ static void ApplyItemFromDropdown(int itemId,
     }
 }
 
+static bool ExecuteAssignedShortcut(const engine::InputSystem& input,
+                                    vamp::SceneData& scene,
+                                    EditorState& editor,
+                                    vamp::SceneLoader& sceneLoader,
+                                    engine::OccluderSet& occluders,
+                                    const engine::Grid& grid)
+{
+    if (editor.selectedTiles.empty())
+        return false;
+
+    for (const auto& binding : editor.shortcutBindings)
+    {
+        if (!input.IsKeyPressed(binding.vk))
+            continue;
+
+        ApplyItemFromDropdown(binding.actionId, scene, editor, sceneLoader, occluders, grid);
+        RefreshContextMenuItems(editor, scene);
+        return true;
+    }
+
+    return false;
+}
+
 // ---------------------------------------------------------------------------
 // Main editor frame
 // ---------------------------------------------------------------------------
@@ -1247,6 +1481,8 @@ void EditorFrame(engine::RendererD3D12& renderer,
     if (sceneLoader.IsLoaded())
         SyncFocusedTileSelection(sceneLoader.GetSceneData(), editor);
 
+    bool shortcutAssignedThisFrame = false;
+
     // --- Context menu + selection ---
     {
         bool anyDropdownOpen = false;
@@ -1261,8 +1497,29 @@ void EditorFrame(engine::RendererD3D12& renderer,
                 anyDropdownOpen = true;
         }
 
+        if (editor.itemDropdown && editor.itemDropdown->IsOpen())
+        {
+            const int hoveredActionId = editor.itemDropdown->GetHoveredItemId();
+            const int pressedShortcut = GetFirstPressedAssignableShortcutKey(input);
+            if (hoveredActionId >= 0 &&
+                pressedShortcut != 0 &&
+                IsAssignableShortcutAction(hoveredActionId))
+            {
+                SetShortcutForAction(editor, hoveredActionId, pressedShortcut);
+                SaveShortcutBindings(editor);
+                RefreshContextMenuItems(editor, sceneLoader.GetSceneData());
+                shortcutAssignedThisFrame = true;
+
+                std::ostringstream ss;
+                ss << "[Editor] Shortcut "
+                   << ShortcutKeyName(pressedShortcut)
+                   << " -> action " << hoveredActionId << "\n";
+                OutputDebugStringA(ss.str().c_str());
+            }
+        }
+
         // Forward character input to open dropdowns
-        if (anyDropdownOpen && input.HasChar())
+        if (anyDropdownOpen && !shortcutAssignedThisFrame && input.HasChar())
         {
             uiSystem.HandleChar(input.GetChar());
             input.ConsumeChar();
@@ -1400,9 +1657,14 @@ void EditorFrame(engine::RendererD3D12& renderer,
 
     // --- Handle active selection hotkeys ---
     if (editor.selection == EditorSelection::Tile) {
-        HandleTerrainHotkey(input, sceneLoader.GetSceneData(), editor,
-            sceneLoader, occluders, grid);
-        HandleItemHotkey(input, sceneLoader.GetSceneData(), editor);
+        if (!shortcutAssignedThisFrame &&
+            !ExecuteAssignedShortcut(input, sceneLoader.GetSceneData(), editor,
+            sceneLoader, occluders, grid))
+        {
+            HandleTerrainHotkey(input, sceneLoader.GetSceneData(), editor,
+                sceneLoader, occluders, grid);
+            HandleItemHotkey(input, sceneLoader.GetSceneData(), editor);
+        }
     }
 
     // --- Update title bar ---

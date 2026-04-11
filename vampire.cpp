@@ -345,6 +345,7 @@ bool InitEngine(HWND hwnd, uint32_t width, uint32_t height)
         // Initialize editor state
         g_editorState.active    = true;
         g_editorState.scenePath = g_scenePath;
+        g_editorState.shortcutConfigPath = exeDir + "editor.ini";
 
         OutputDebugStringA("[Vampire] EDITOR MODE active.\n");
     }
