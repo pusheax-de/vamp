@@ -199,8 +199,6 @@ static bool PlaceSelectedObject(vamp::SceneData& scene,
         ss << " " << sourceLabel;
     ss << "\n";
     OutputDebugStringA(ss.str().c_str());
-
-    editor.ClearSelection();
     return true;
 }
 
@@ -674,8 +672,6 @@ static bool HandleItemHotkey(const engine::InputSystem& input,
                    << placed << " tile(s)\n";
                 OutputDebugStringA(ss.str().c_str());
             }
-
-            editor.ClearSelection();
             return true;
         }
     }
@@ -1610,7 +1606,8 @@ static void EditorSubmitObjects(EditorState& editor,
     const engine::Grid& grid,
     engine::RenderQueue& renderQueue,
     engine::RendererD3D12& renderer) {
-    for (const auto& obj : scene.objects) {
+    for (size_t objIndex = 0; objIndex < scene.objects.size(); ++objIndex) {
+        const auto& obj = scene.objects[objIndex];
         int idx = static_cast<int>(obj.type);
         EnsureObjectTexture(editor, obj.type, obj.imagePath, renderer);
 
@@ -1693,6 +1690,9 @@ static void EditorSubmitObjects(EditorState& editor,
         inst.textureIndex = editor.objectTextures[idx].GetSRVIndex();
         inst.pad = 0;
 
-        renderQueue.Submit(engine::RenderLayer::WallsProps, inst.sortY, 50, 0, inst);
+        // Use the object index as a stable tie-breaker when overlapping objects
+        // resolve to the same Y-sort value.
+        renderQueue.Submit(engine::RenderLayer::WallsProps, inst.sortY, 50,
+                           static_cast<uint16_t>(objIndex & 0xFFFF), inst);
     }
 }
