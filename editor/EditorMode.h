@@ -21,8 +21,17 @@
 enum class EditorSelection
 {
     None,
-    Tile,       // LMB selected -- waiting for terrain hotkey
-    Item,       // RMB selected -- waiting for item hotkey
+    Tile,
+};
+
+enum class EditorContextMenuPage
+{
+    Root,
+    Ground,
+    PlaceItem,
+    PlaceObject,
+    SelectedItem,
+    SelectedObject,
 };
 
 // ---------------------------------------------------------------------------
@@ -43,6 +52,12 @@ struct EditorState
     bool                    active          = false;
     EditorSelection         selection       = EditorSelection::None;
     std::vector<TileCoord>  selectedTiles;              // All selected tiles
+    int                     selectedPlacedOrdinal = -1; // Combined placed-content selection for the primary tile
+    int                     selectedObjectIndex = -1;   // Scene object targeted by item selection
+    int                     selectedGroundItemOrdinal = -1;
+    EditorContextMenuPage   contextMenuPage = EditorContextMenuPage::Root;
+    float                   contextMenuX = 0.0f;
+    float                   contextMenuY = 0.0f;
     bool                    dirty           = false;    // Unsaved changes
     std::string             scenePath;                  // Path for Ctrl+S
 
@@ -56,12 +71,25 @@ struct EditorState
     ui::UIDropdown*         terrainDropdown = nullptr;
     ui::UIDropdown*         itemDropdown    = nullptr;
 
+    // Terrain textures (loaded on demand, keyed by TerrainType)
+    engine::Texture2D   terrainTextures[static_cast<int>(vamp::TerrainType::COUNT)];
+    bool                terrainTexturesLoaded[static_cast<int>(vamp::TerrainType::COUNT)] = {};
+
     // Object textures (loaded on demand, keyed by SceneObjectType)
     engine::Texture2D   objectTextures[static_cast<int>(vamp::SceneObjectType::COUNT)];
     bool                objectTexturesLoaded[static_cast<int>(vamp::SceneObjectType::COUNT)] = {};
 
     void ShutdownTextures(engine::PersistentDescriptorAllocator& srvHeap)
     {
+        for (int i = 0; i < static_cast<int>(vamp::TerrainType::COUNT); ++i)
+        {
+            if (terrainTexturesLoaded[i])
+            {
+                terrainTextures[i].Shutdown(srvHeap);
+                terrainTexturesLoaded[i] = false;
+            }
+        }
+
         for (int i = 0; i < static_cast<int>(vamp::SceneObjectType::COUNT); ++i)
         {
             if (objectTexturesLoaded[i])
@@ -76,6 +104,9 @@ struct EditorState
     {
         selection = EditorSelection::None;
         selectedTiles.clear();
+        selectedPlacedOrdinal = -1;
+        selectedObjectIndex = -1;
+        selectedGroundItemOrdinal = -1;
     }
 
     bool HasTile(int tx, int ty) const

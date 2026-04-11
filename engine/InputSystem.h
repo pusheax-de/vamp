@@ -212,7 +212,7 @@ public:
         }
 
         // --- Camera: scroll-wheel zoom ---
-        if (m_scrollDelta != 0.0f)
+        if (m_zoomEnabled && m_scrollDelta != 0.0f)
         {
             float zoomFactor = 1.0f + m_scrollDelta * m_zoomSensitivity;
             float newZoom = camera.GetZoom() * zoomFactor;
@@ -321,6 +321,7 @@ public:
     void SetEdgeScrollSpeed(float pixelsPerSec)  { m_edgeScrollSpeed   = pixelsPerSec; }
     void SetKeyboardPanEnabled(bool enabled)     { m_keyboardPanEnabled = enabled; }
     void SetRMBDragEnabled(bool enabled)         { m_rmbDragEnabled = enabled; }
+    void SetZoomEnabled(bool enabled)            { m_zoomEnabled = enabled; }
 
 private:
     // Keyboard state
@@ -384,6 +385,7 @@ private:
 
     // RMB drag toggle
     bool  m_rmbDragEnabled = true;
+    bool  m_zoomEnabled = true;
 
     // Edge-scroll tuning
     bool  m_edgeScrollEnabled = true;
