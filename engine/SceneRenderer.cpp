@@ -7,6 +7,25 @@
 namespace engine
 {
 
+namespace
+{
+    static float DepthForLayer(RenderLayer layer)
+    {
+        switch (layer)
+        {
+        case RenderLayer::BackgroundPages:   return 0.95f;
+        case RenderLayer::GroundTiles:       return 0.80f;
+        case RenderLayer::WallsProps:        return 0.60f;
+        case RenderLayer::Actors:            return 0.45f;
+        case RenderLayer::Roofs:             return 0.30f;
+        case RenderLayer::RoofActors:        return 0.20f;
+        case RenderLayer::ScreenSpaceIcons:  return 0.0f;
+        case RenderLayer::FogOverlay:        return 0.10f;
+        default:                             return 0.50f;
+        }
+    }
+}
+
 // ===========================================================================
 // Init / Shutdown / Resize
 // ===========================================================================
@@ -212,7 +231,8 @@ void SceneRenderer::PassBackground(ID3D12GraphicsCommandList* cmdList,
 
     // Set render target
     auto rtvHandle = renderer.GetRTVHeap().GetCPUHandle(m_sceneColor.GetRTVIndex());
-    cmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+    auto dsvHandle = renderer.GetDSVHeap().GetCPUHandle(m_depthStencil.GetDSVIndex());
+    cmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
     // Viewport and scissor for full-res SceneColor
     D3D12_VIEWPORT vp = { 0, 0,
@@ -249,7 +269,7 @@ void SceneRenderer::PassBackground(ID3D12GraphicsCommandList* cmdList,
         inst.rotation = 0.0f;
         inst.sortY    = 0.0f;
         inst.textureIndex = bgImage.srvIndex;
-        inst.pad      = 0;
+        inst.depthZ   = DepthForLayer(RenderLayer::BackgroundPages);
         instances.push_back(inst);
     }
 
@@ -264,7 +284,7 @@ void SceneRenderer::PassBackground(ID3D12GraphicsCommandList* cmdList,
         inst.rotation = 0.0f;
         inst.sortY    = 0.0f;
         inst.textureIndex = page.srvIndex;
-        inst.pad      = 0;
+        inst.depthZ   = DepthForLayer(RenderLayer::BackgroundPages);
         instances.push_back(inst);
     }
 
@@ -312,7 +332,8 @@ void SceneRenderer::PassBaseScene(ID3D12GraphicsCommandList* cmdList,
 
     // Set render target, viewport, and scissor
     auto rtvHandle = renderer.GetRTVHeap().GetCPUHandle(m_sceneColor.GetRTVIndex());
-    cmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+    auto dsvHandle = renderer.GetDSVHeap().GetCPUHandle(m_depthStencil.GetDSVIndex());
+    cmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
     D3D12_VIEWPORT vp = { 0, 0,
                            static_cast<float>(m_config.fullResWidth),
@@ -338,15 +359,40 @@ void SceneRenderer::PassBaseScene(ID3D12GraphicsCommandList* cmdList,
 
     const auto& items = renderQueue.GetItems();
     for (size_t i = groundRange.begin; i < groundRange.end; ++i)
-        instances.push_back(items[i].instance);
+    {
+        SpriteInstance inst = items[i].instance;
+        if (inst.depthZ <= 0.0f)
+            inst.depthZ = DepthForLayer(RenderLayer::GroundTiles);
+        instances.push_back(inst);
+    }
     for (size_t i = wallRange.begin; i < wallRange.end; ++i)
-        instances.push_back(items[i].instance);
+    {
+        SpriteInstance inst = items[i].instance;
+        if (inst.depthZ <= 0.0f)
+            inst.depthZ = DepthForLayer(RenderLayer::WallsProps);
+        instances.push_back(inst);
+    }
     for (size_t i = actorRange.begin; i < actorRange.end; ++i)
-        instances.push_back(items[i].instance);
+    {
+        SpriteInstance inst = items[i].instance;
+        if (inst.depthZ <= 0.0f)
+            inst.depthZ = DepthForLayer(RenderLayer::Actors);
+        instances.push_back(inst);
+    }
     for (size_t i = roofRange.begin; i < roofRange.end; ++i)
-        instances.push_back(items[i].instance);
+    {
+        SpriteInstance inst = items[i].instance;
+        if (inst.depthZ <= 0.0f)
+            inst.depthZ = DepthForLayer(RenderLayer::Roofs);
+        instances.push_back(inst);
+    }
     for (size_t i = roofActRange.begin; i < roofActRange.end; ++i)
-        instances.push_back(items[i].instance);
+    {
+        SpriteInstance inst = items[i].instance;
+        if (inst.depthZ <= 0.0f)
+            inst.depthZ = DepthForLayer(RenderLayer::RoofActors);
+        instances.push_back(inst);
+    }
 
     if (instances.empty())
         return;

@@ -14,5 +14,7 @@ struct PSInput
 float4 main(PSInput input) : SV_TARGET
 {
     float4 texColor = textures[input.texIndex].Sample(linearSampler, input.uv);
-    return texColor * input.color;
+    float4 outColor = texColor * input.color;
+    clip(outColor.a - 0.001f);
+    return outColor;
 }

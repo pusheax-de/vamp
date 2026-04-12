@@ -33,7 +33,7 @@ namespace vamp
 // File header
 // ---------------------------------------------------------------------------
 static const uint32_t kSceneMagic   = 0x31504D56; // "VMP1" in little-endian
-static const uint32_t kSceneVersion = 3;
+static const uint32_t kSceneVersion = 4;
 
 struct SceneHeader
 {
@@ -202,13 +202,6 @@ struct SceneRoof
 // ---------------------------------------------------------------------------
 // Placed object covering a bounding box of tiles (e.g. hangar, building)
 // ---------------------------------------------------------------------------
-enum class SceneObjectType : uint8_t
-{
-    Hangar,
-    WallVert,
-    COUNT
-};
-
 enum class SceneObjectPlacement : uint8_t
 {
     YMin,
@@ -218,12 +211,13 @@ enum class SceneObjectPlacement : uint8_t
 
 struct SceneObject
 {
-    SceneObjectType      type      = SceneObjectType::Hangar;
+    uint64_t             typeId    = 0;
     SceneObjectPlacement placement = SceneObjectPlacement::YMax;
     uint8_t              reserved0 = 0;
     uint8_t              reserved1 = 0;
     uint8_t              reserved2 = 0;
     int32_t              x0 = 0, y0 = 0, x1 = 0, y1 = 0; // Tile bounding box
+    char                 typeName[64]  = {};             // Logical object name
     char                 imagePath[128] = {};             // Relative path to PNG
     char                 tag[32]        = {};
 };

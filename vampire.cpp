@@ -863,7 +863,7 @@ static void SubmitPlayerIndicator()
     inst.rotation     = g_playerFacingAngle;
     inst.sortY        = g_playerWorldY;
     inst.textureIndex = g_playerIndicatorTex.GetSRVIndex();
-    inst.pad          = 0;
+    inst.depthZ       = 0.45f;
 
     g_renderQueue.Submit(engine::RenderLayer::Actors, inst.sortY, 100, 0, inst);
 }

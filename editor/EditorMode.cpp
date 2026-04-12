@@ -7,6 +7,9 @@
 #include <cstring>
 #include <cmath>
 #include <fstream>
+#include <unordered_map>
+#include <cstdio>
+#include <cstdlib>
 
 // Forward declarations
 static void EnsureTerrainTexture(EditorState& editor,
@@ -17,21 +20,19 @@ static void EditorSubmitGroundTiles(EditorState& editor,
                                     const engine::Grid& grid,
                                     engine::RenderQueue& renderQueue,
                                     engine::RendererD3D12& renderer);
-static void EnsureObjectTexture(EditorState& editor,
-                                vamp::SceneObjectType type,
-                                const char* imagePath,
-                                engine::RendererD3D12& renderer);
+static engine::Texture2D* EnsureObjectTexture(EditorState& editor,
+                                              const char* imagePath,
+                                              engine::RendererD3D12& renderer);
 static void EditorSubmitObjects(EditorState& editor,
                                 const vamp::SceneData& scene,
                                 const engine::Grid& grid,
                                 engine::RenderQueue& renderQueue,
                                 engine::RendererD3D12& renderer);
-static const char* SceneObjectDisplayName(vamp::SceneObjectType type);
+static std::string SceneObjectDisplayName(const EditorState& editor, const vamp::SceneObject& obj);
 static const char* SceneObjectPlacementName(vamp::SceneObjectPlacement placement);
-static void FillObjectImagePath(vamp::SceneObjectType type, char (&imagePath)[128]);
 static bool PlaceSelectedObject(vamp::SceneData& scene,
                                 EditorState& editor,
-                                vamp::SceneObjectType type,
+                                const EditorObjectAsset& asset,
                                 const char* sourceLabel);
 static int FindTopmostObjectAtTile(const vamp::SceneData& scene, int tx, int ty);
 static void RefreshContextMenuItems(EditorState& editor, const vamp::SceneData& scene);
@@ -46,12 +47,12 @@ static std::vector<TilePlacedEntry> GetPlacedEntriesAtTile(const vamp::SceneData
 static void SyncFocusedTileSelection(const vamp::SceneData& scene, EditorState& editor);
 static const char* GroundItemName(const vamp::SceneGroundItem& gi);
 static const char* ContextMenuPageTitle(EditorContextMenuPage page);
-static int GetShortcutForAction(const EditorState& editor, int actionId);
-static void SetShortcutForAction(EditorState& editor, int actionId, int vk);
+static int GetShortcutForAction(const EditorState& editor, uint64_t actionId);
+static void SetShortcutForAction(EditorState& editor, uint64_t actionId, int vk);
 static std::string ShortcutKeyName(int vk);
 static int ParseShortcutKeyName(const std::string& text);
-static std::string ContextMenuActionLabel(const EditorState& editor, int actionId, const char* label);
-static bool IsAssignableShortcutAction(int actionId);
+static std::string ContextMenuActionLabel(const EditorState& editor, uint64_t actionId, const char* label);
+static bool IsAssignableShortcutAction(uint64_t actionId);
 static bool IsAssignableShortcutKey(int vk);
 static int GetFirstPressedAssignableShortcutKey(const engine::InputSystem& input);
 static void SaveShortcutBindings(const EditorState& editor);
@@ -62,12 +63,13 @@ static bool ExecuteAssignedShortcut(const engine::InputSystem& input,
                                     vamp::SceneLoader& sceneLoader,
                                     engine::OccluderSet& occluders,
                                     const engine::Grid& grid);
-static void ApplyTerrainFromDropdown(int terrainId,
+static void ApplyTerrainFromDropdown(uint64_t terrainId,
                                      vamp::SceneData& scene,
                                      EditorState& editor,
                                      vamp::SceneLoader& sceneLoader,
                                      engine::OccluderSet& occluders,
                                      const engine::Grid& grid);
+static void DiscoverEditorAssets(EditorState& editor);
 
 // ---------------------------------------------------------------------------
 // Helpers: build a MapTile from terrain type with sensible defaults
@@ -125,14 +127,108 @@ static const char* EditorTerrainName(vamp::TerrainType t)
     }
 }
 
-static const char* SceneObjectDisplayName(vamp::SceneObjectType type)
+static const uint64_t kActionBack                 = 0xFFFFFFFFFFFFFFF0ull;
+static const uint64_t kActionRootGround           = 0xFFFFFFFFFFFFFFE0ull;
+static const uint64_t kActionRootPlaceItem        = 0xFFFFFFFFFFFFFFE1ull;
+static const uint64_t kActionRootPlaceObject      = 0xFFFFFFFFFFFFFFE2ull;
+static const uint64_t kActionRootSelectedItem     = 0xFFFFFFFFFFFFFFE3ull;
+static const uint64_t kActionRootSelectedObject   = 0xFFFFFFFFFFFFFFE4ull;
+static const uint64_t kActionDeleteFirst          = 0xFFFFFFFFFFFFFFD0ull;
+static const uint64_t kActionCopySelectedItem     = 0xFFFFFFFFFFFFFFD1ull;
+static const uint64_t kActionDeleteSelectedItem   = 0xFFFFFFFFFFFFFFD2ull;
+static const uint64_t kActionPlacementYMin        = 0xFFFFFFFFFFFFFFC0ull;
+static const uint64_t kActionPlacementYMiddle     = 0xFFFFFFFFFFFFFFC1ull;
+static const uint64_t kActionPlacementYMax        = 0xFFFFFFFFFFFFFFC2ull;
+static const uint64_t kActionDeleteSelectedObject = 0xFFFFFFFFFFFFFFC3ull;
+static const uint64_t kActionConsumableBase       = 0xFFFFFFFFFFFFF000ull;
+
+static uint64_t HashAssetName(const std::string& text)
 {
-    switch (type)
+    const uint64_t kOffset = 14695981039346656037ull;
+    const uint64_t kPrime  = 1099511628211ull;
+
+    uint64_t hash = kOffset;
+    for (size_t i = 0; i < text.size(); ++i)
     {
-    case vamp::SceneObjectType::Hangar:   return "Hangar";
-    case vamp::SceneObjectType::WallVert: return "Wall Vertical";
-    default:                              return "Object";
+        hash ^= static_cast<uint8_t>(text[i]);
+        hash *= kPrime;
     }
+    return hash;
+}
+
+static std::string ToLowerCopy(const std::string& text)
+{
+    std::string lowered = text;
+    for (size_t i = 0; i < lowered.size(); ++i)
+    {
+        lowered[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(lowered[i])));
+    }
+    return lowered;
+}
+
+static std::string WideToNarrow(const std::wstring& text)
+{
+    std::string out;
+    out.reserve(text.size());
+    for (size_t i = 0; i < text.size(); ++i)
+    {
+        wchar_t ch = text[i];
+        out.push_back(ch >= 0 && ch <= 127 ? static_cast<char>(ch) : '?');
+    }
+    return out;
+}
+
+static std::wstring GetExecutableDirectory()
+{
+    wchar_t exePath[MAX_PATH];
+    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+    std::wstring dir(exePath);
+    size_t slash = dir.find_last_of(L"\\/");
+    if (slash != std::wstring::npos)
+        dir = dir.substr(0, slash + 1);
+    return dir;
+}
+
+static std::string GetFileStem(const std::string& path)
+{
+    size_t slash = path.find_last_of("\\/");
+    size_t start = (slash == std::string::npos) ? 0 : (slash + 1);
+    size_t dot = path.find_last_of('.');
+    if (dot == std::string::npos || dot < start)
+        dot = path.size();
+    return path.substr(start, dot - start);
+}
+
+static bool TryParseTerrainAssetName(const std::string& name, vamp::TerrainType& terrain)
+{
+    const std::string lowered = ToLowerCopy(name);
+    if (lowered == "floor")      { terrain = vamp::TerrainType::Floor; return true; }
+    if (lowered == "street")     { terrain = vamp::TerrainType::Street; return true; }
+    if (lowered == "rubble")     { terrain = vamp::TerrainType::Rubble; return true; }
+    if (lowered == "water")      { terrain = vamp::TerrainType::Water; return true; }
+    if (lowered == "wall")       { terrain = vamp::TerrainType::Wall; return true; }
+    if (lowered == "door")       { terrain = vamp::TerrainType::Door; return true; }
+    if (lowered == "metrotrack") { terrain = vamp::TerrainType::MetroTrack; return true; }
+    if (lowered == "shadow")     { terrain = vamp::TerrainType::Shadow; return true; }
+    return false;
+}
+
+static std::string SceneObjectDisplayName(const EditorState& editor, const vamp::SceneObject& obj)
+{
+    if (obj.typeName[0] != '\0')
+        return obj.typeName;
+
+    std::unordered_map<uint64_t, size_t>::const_iterator it =
+        editor.objectAssetIndexByTypeId.find(obj.typeId);
+    if (it != editor.objectAssetIndexByTypeId.end())
+        return editor.objectAssets[it->second].name;
+
+    if (obj.imagePath[0] != '\0')
+        return GetFileStem(obj.imagePath);
+
+    std::ostringstream ss;
+    ss << "object_" << obj.typeId;
+    return ss.str();
 }
 
 static const char* SceneObjectPlacementName(vamp::SceneObjectPlacement placement)
@@ -146,47 +242,114 @@ static const char* SceneObjectPlacementName(vamp::SceneObjectPlacement placement
     }
 }
 
-static const char* TerrainTexturePath(vamp::TerrainType terrain)
+static void CollectPngFilesRecursive(const std::wstring& dir, std::vector<std::wstring>& files)
 {
-    switch (terrain)
+    WIN32_FIND_DATAW findData;
+    HANDLE hFind = FindFirstFileW((dir + L"\\*").c_str(), &findData);
+    if (hFind == INVALID_HANDLE_VALUE)
+        return;
+
+    do
     {
-    case vamp::TerrainType::Floor:      return "assets\\floor\\floor.png";
-    case vamp::TerrainType::Street:     return "assets\\floor\\street.png";
-    case vamp::TerrainType::Rubble:     return "assets\\floor\\rubble.png";
-    case vamp::TerrainType::Water:      return "assets\\floor\\water.png";
-    case vamp::TerrainType::Wall:       return "assets\\floor\\wall.png";
-    case vamp::TerrainType::Door:       return "assets\\floor\\door.png";
-    case vamp::TerrainType::MetroTrack: return "assets\\floor\\metrotrack.png";
-    case vamp::TerrainType::Shadow:     return "assets\\floor\\shadow.png";
-    default:                            return "assets\\floor\\floor.png";
+        const wchar_t* name = findData.cFileName;
+        if (wcscmp(name, L".") == 0 || wcscmp(name, L"..") == 0)
+            continue;
+
+        const std::wstring fullPath = dir + L"\\" + name;
+        if ((findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+        {
+            CollectPngFilesRecursive(fullPath, files);
+            continue;
+        }
+
+        const wchar_t* ext = wcsrchr(name, L'.');
+        if (ext != nullptr && _wcsicmp(ext, L".png") == 0)
+            files.push_back(fullPath);
     }
+    while (FindNextFileW(hFind, &findData));
+
+    FindClose(hFind);
 }
 
-static void FillObjectImagePath(vamp::SceneObjectType type, char (&imagePath)[128])
+static void DiscoverEditorAssets(EditorState& editor)
 {
-    std::memset(imagePath, 0, sizeof(imagePath));
-
-    const char* path = "";
-    switch (type)
+    editor.terrainAssets.clear();
+    editor.objectAssets.clear();
+    editor.terrainAssetIndexByActionId.clear();
+    editor.objectAssetIndexByTypeId.clear();
+    for (int i = 0; i < static_cast<int>(vamp::TerrainType::COUNT); ++i)
     {
-    case vamp::SceneObjectType::Hangar:
-        path = "assets\\hangar\\hangar.png";
-        break;
-    case vamp::SceneObjectType::WallVert:
-        path = "assets\\wall\\wall_vert.png";
-        break;
-    default:
-        break;
+        editor.terrainTexturePaths[i].clear();
+        editor.terrainTexturesLoaded[i] = false;
     }
 
-    size_t len = std::strlen(path);
-    if (len >= sizeof(imagePath)) len = sizeof(imagePath) - 1;
-    std::memcpy(imagePath, path, len);
+    const std::wstring exeDir = GetExecutableDirectory();
+    const std::wstring assetsDir = exeDir + L"assets";
+    std::vector<std::wstring> pngFiles;
+    CollectPngFilesRecursive(assetsDir, pngFiles);
+    std::sort(pngFiles.begin(), pngFiles.end());
+
+    std::unordered_map<uint64_t, std::string> claimedNames;
+    const std::wstring floorPrefix = assetsDir + L"\\floor\\";
+
+    for (size_t i = 0; i < pngFiles.size(); ++i)
+    {
+        const std::wstring& fullPath = pngFiles[i];
+        if (fullPath.size() <= exeDir.size())
+            continue;
+
+        std::wstring relativeWide = fullPath.substr(exeDir.size());
+        std::replace(relativeWide.begin(), relativeWide.end(), L'/', L'\\');
+        const std::string relativePath = WideToNarrow(relativeWide);
+        const std::string assetName = ToLowerCopy(GetFileStem(relativePath));
+        const uint64_t hash = HashAssetName(assetName);
+
+        std::unordered_map<uint64_t, std::string>::const_iterator collision = claimedNames.find(hash);
+        if (collision != claimedNames.end())
+        {
+            std::fprintf(stderr,
+                "[Editor] WARNING: asset hash collision for '%s' and '%s'. Skipping '%s'.\n",
+                collision->second.c_str(), assetName.c_str(), relativePath.c_str());
+            continue;
+        }
+
+        if (fullPath.compare(0, floorPrefix.size(), floorPrefix) == 0)
+        {
+            vamp::TerrainType terrain = vamp::TerrainType::Floor;
+            if (!TryParseTerrainAssetName(assetName, terrain))
+            {
+                std::fprintf(stderr,
+                    "[Editor] WARNING: unknown floor asset '%s'. Skipping.\n",
+                    relativePath.c_str());
+                continue;
+            }
+
+            claimedNames[hash] = assetName;
+            EditorTerrainAsset asset;
+            asset.actionId = hash;
+            asset.terrain = terrain;
+            asset.name = assetName;
+            asset.imagePath = relativePath;
+            editor.terrainAssetIndexByActionId[asset.actionId] = editor.terrainAssets.size();
+            editor.terrainAssets.push_back(asset);
+            editor.terrainTexturePaths[static_cast<int>(terrain)] = relativePath;
+        }
+        else
+        {
+            claimedNames[hash] = assetName;
+            EditorObjectAsset asset;
+            asset.typeId = hash;
+            asset.name = assetName;
+            asset.imagePath = relativePath;
+            editor.objectAssetIndexByTypeId[asset.typeId] = editor.objectAssets.size();
+            editor.objectAssets.push_back(asset);
+        }
+    }
 }
 
 static bool PlaceSelectedObject(vamp::SceneData& scene,
                                 EditorState& editor,
-                                vamp::SceneObjectType type,
+                                const EditorObjectAsset& asset,
                                 const char* sourceLabel)
 {
     if (editor.selectedTiles.empty())
@@ -196,13 +359,18 @@ static bool PlaceSelectedObject(vamp::SceneData& scene,
     for (const auto& tc : editor.selectedTiles)
     {
         vamp::SceneObject obj;
-        obj.type = type;
+        obj.typeId = asset.typeId;
         obj.x0   = tc.x;
         obj.y0   = tc.y;
         obj.x1   = tc.x;
         obj.y1   = tc.y;
         obj.placement = vamp::SceneObjectPlacement::YMax;
-        FillObjectImagePath(type, obj.imagePath);
+        std::memset(obj.typeName, 0, sizeof(obj.typeName));
+        size_t nameLen = (std::min)(asset.name.size(), sizeof(obj.typeName) - 1);
+        std::memcpy(obj.typeName, asset.name.data(), nameLen);
+        std::memset(obj.imagePath, 0, sizeof(obj.imagePath));
+        size_t pathLen = (std::min)(asset.imagePath.size(), sizeof(obj.imagePath) - 1);
+        std::memcpy(obj.imagePath, asset.imagePath.data(), pathLen);
         std::memset(obj.tag, 0, sizeof(obj.tag));
         scene.objects.push_back(obj);
         ++placed;
@@ -210,7 +378,7 @@ static bool PlaceSelectedObject(vamp::SceneData& scene,
 
     editor.dirty = true;
     std::ostringstream ss;
-    ss << "[Editor] Placed " << SceneObjectDisplayName(type)
+    ss << "[Editor] Placed " << asset.name
        << " on " << placed << " tile(s)";
     if (sourceLabel && sourceLabel[0])
         ss << " " << sourceLabel;
@@ -290,7 +458,7 @@ static const char* ContextMenuPageTitle(EditorContextMenuPage page)
     }
 }
 
-static int GetShortcutForAction(const EditorState& editor, int actionId)
+static int GetShortcutForAction(const EditorState& editor, uint64_t actionId)
 {
     for (const auto& binding : editor.shortcutBindings)
     {
@@ -300,7 +468,7 @@ static int GetShortcutForAction(const EditorState& editor, int actionId)
     return 0;
 }
 
-static void SetShortcutForAction(EditorState& editor, int actionId, int vk)
+static void SetShortcutForAction(EditorState& editor, uint64_t actionId, int vk)
 {
     editor.shortcutBindings.erase(
         std::remove_if(editor.shortcutBindings.begin(), editor.shortcutBindings.end(),
@@ -310,7 +478,7 @@ static void SetShortcutForAction(EditorState& editor, int actionId, int vk)
             }),
         editor.shortcutBindings.end());
 
-    if (actionId >= 0 && vk != 0)
+    if (actionId != 0 && vk != 0)
         editor.shortcutBindings.push_back({ actionId, vk });
 }
 
@@ -377,7 +545,7 @@ static int ParseShortcutKeyName(const std::string& text)
     return 0;
 }
 
-static std::string ContextMenuActionLabel(const EditorState& editor, int actionId, const char* label)
+static std::string ContextMenuActionLabel(const EditorState& editor, uint64_t actionId, const char* label)
 {
     std::string result = label ? label : "";
     const int shortcut = GetShortcutForAction(editor, actionId);
@@ -390,9 +558,9 @@ static std::string ContextMenuActionLabel(const EditorState& editor, int actionI
     return result;
 }
 
-static bool IsAssignableShortcutAction(int actionId)
+static bool IsAssignableShortcutAction(uint64_t actionId)
 {
-    return actionId >= 0 && actionId != 7099;
+    return actionId != 0 && actionId != kActionBack;
 }
 
 static bool IsAssignableShortcutKey(int vk)
@@ -475,9 +643,9 @@ static void LoadShortcutBindings(EditorState& editor)
         if (eq == std::string::npos)
             continue;
 
-        const int actionId = std::atoi(line.substr(0, eq).c_str());
+        const uint64_t actionId = static_cast<uint64_t>(std::strtoull(line.substr(0, eq).c_str(), nullptr, 10));
         const int vk = ParseShortcutKeyName(line.substr(eq + 1));
-        if (actionId >= 0 && vk != 0)
+        if (actionId != 0 && vk != 0)
             SetShortcutForAction(editor, actionId, vk);
     }
 }
@@ -574,7 +742,7 @@ static std::string BuildSelectedPlacedLabel(const vamp::SceneData& scene,
     else
     {
         const vamp::SceneObject& obj = scene.objects[selected.index];
-        ss << SceneObjectDisplayName(obj.type)
+        ss << SceneObjectDisplayName(editor, obj)
            << " (" << SceneObjectPlacementName(obj.placement) << ")";
     }
     return ss.str();
@@ -596,64 +764,66 @@ static void RefreshContextMenuItems(EditorState& editor, const vamp::SceneData& 
     switch (editor.contextMenuPage)
     {
     case EditorContextMenuPage::Root:
-        itemItems.push_back({ 7000, ContextMenuActionLabel(editor, 7000, "Ground >") });
-        itemItems.push_back({ 7001, ContextMenuActionLabel(editor, 7001, "Place Item >") });
-        itemItems.push_back({ 7002, ContextMenuActionLabel(editor, 7002, "Place Object >") });
+        itemItems.push_back({ kActionRootGround, ContextMenuActionLabel(editor, kActionRootGround, "Ground >") });
+        itemItems.push_back({ kActionRootPlaceItem, ContextMenuActionLabel(editor, kActionRootPlaceItem, "Place Item >") });
+        itemItems.push_back({ kActionRootPlaceObject, ContextMenuActionLabel(editor, kActionRootPlaceObject, "Place Object >") });
         if (editor.selectedGroundItemOrdinal >= 0 &&
             editor.selectedGroundItemOrdinal < static_cast<int>(groundItems.size()))
-            itemItems.push_back({ 7003, ContextMenuActionLabel(editor, 7003, "Selected Item >") });
+            itemItems.push_back({ kActionRootSelectedItem, ContextMenuActionLabel(editor, kActionRootSelectedItem, "Selected Item >") });
         if (editor.selectedObjectIndex >= 0 &&
             editor.selectedObjectIndex < static_cast<int>(scene.objects.size()))
-            itemItems.push_back({ 7004, ContextMenuActionLabel(editor, 7004, "Selected Object >") });
-        itemItems.push_back({ 9999, ContextMenuActionLabel(editor, 9999, "[Delete First Item/Object At Tile]") });
+            itemItems.push_back({ kActionRootSelectedObject, ContextMenuActionLabel(editor, kActionRootSelectedObject, "Selected Object >") });
+        itemItems.push_back({ kActionDeleteFirst, ContextMenuActionLabel(editor, kActionDeleteFirst, "[Delete First Item/Object At Tile]") });
         break;
 
     case EditorContextMenuPage::Ground:
-        itemItems.push_back({ 7099, "< Back" });
-        itemItems.push_back({ 5000 + static_cast<int>(vamp::TerrainType::Floor),      ContextMenuActionLabel(editor, 5000 + static_cast<int>(vamp::TerrainType::Floor), "Floor") });
-        itemItems.push_back({ 5000 + static_cast<int>(vamp::TerrainType::Street),     ContextMenuActionLabel(editor, 5000 + static_cast<int>(vamp::TerrainType::Street), "Street") });
-        itemItems.push_back({ 5000 + static_cast<int>(vamp::TerrainType::Rubble),     ContextMenuActionLabel(editor, 5000 + static_cast<int>(vamp::TerrainType::Rubble), "Rubble") });
-        itemItems.push_back({ 5000 + static_cast<int>(vamp::TerrainType::Water),      ContextMenuActionLabel(editor, 5000 + static_cast<int>(vamp::TerrainType::Water), "Water") });
-        itemItems.push_back({ 5000 + static_cast<int>(vamp::TerrainType::Wall),       ContextMenuActionLabel(editor, 5000 + static_cast<int>(vamp::TerrainType::Wall), "Wall") });
-        itemItems.push_back({ 5000 + static_cast<int>(vamp::TerrainType::Door),       ContextMenuActionLabel(editor, 5000 + static_cast<int>(vamp::TerrainType::Door), "Door") });
-        itemItems.push_back({ 5000 + static_cast<int>(vamp::TerrainType::MetroTrack), ContextMenuActionLabel(editor, 5000 + static_cast<int>(vamp::TerrainType::MetroTrack), "Metro Track") });
-        itemItems.push_back({ 5000 + static_cast<int>(vamp::TerrainType::Shadow),     ContextMenuActionLabel(editor, 5000 + static_cast<int>(vamp::TerrainType::Shadow), "Shadow") });
+        itemItems.push_back({ kActionBack, "< Back" });
+        for (size_t i = 0; i < editor.terrainAssets.size(); ++i)
+        {
+            const EditorTerrainAsset& asset = editor.terrainAssets[i];
+            itemItems.push_back({ asset.actionId,
+                ContextMenuActionLabel(editor, asset.actionId, asset.name.c_str()) });
+        }
         break;
 
     case EditorContextMenuPage::PlaceItem:
-        itemItems.push_back({ 7099, "< Back" });
-        itemItems.push_back({ 2000 + static_cast<int>(vamp::ConsumableType::Bandage),   ContextMenuActionLabel(editor, 2000 + static_cast<int>(vamp::ConsumableType::Bandage), "Bandage") });
-        itemItems.push_back({ 2000 + static_cast<int>(vamp::ConsumableType::Stimpack),  ContextMenuActionLabel(editor, 2000 + static_cast<int>(vamp::ConsumableType::Stimpack), "Stimpack") });
-        itemItems.push_back({ 2000 + static_cast<int>(vamp::ConsumableType::Antidote),  ContextMenuActionLabel(editor, 2000 + static_cast<int>(vamp::ConsumableType::Antidote), "Antidote") });
-        itemItems.push_back({ 2000 + static_cast<int>(vamp::ConsumableType::Flashbang), ContextMenuActionLabel(editor, 2000 + static_cast<int>(vamp::ConsumableType::Flashbang), "Flashbang") });
-        itemItems.push_back({ 2000 + static_cast<int>(vamp::ConsumableType::BloodVial), ContextMenuActionLabel(editor, 2000 + static_cast<int>(vamp::ConsumableType::BloodVial), "Blood Vial") });
+        itemItems.push_back({ kActionBack, "< Back" });
+        itemItems.push_back({ kActionConsumableBase + static_cast<uint64_t>(vamp::ConsumableType::Bandage),   ContextMenuActionLabel(editor, kActionConsumableBase + static_cast<uint64_t>(vamp::ConsumableType::Bandage), "Bandage") });
+        itemItems.push_back({ kActionConsumableBase + static_cast<uint64_t>(vamp::ConsumableType::Stimpack),  ContextMenuActionLabel(editor, kActionConsumableBase + static_cast<uint64_t>(vamp::ConsumableType::Stimpack), "Stimpack") });
+        itemItems.push_back({ kActionConsumableBase + static_cast<uint64_t>(vamp::ConsumableType::Antidote),  ContextMenuActionLabel(editor, kActionConsumableBase + static_cast<uint64_t>(vamp::ConsumableType::Antidote), "Antidote") });
+        itemItems.push_back({ kActionConsumableBase + static_cast<uint64_t>(vamp::ConsumableType::Flashbang), ContextMenuActionLabel(editor, kActionConsumableBase + static_cast<uint64_t>(vamp::ConsumableType::Flashbang), "Flashbang") });
+        itemItems.push_back({ kActionConsumableBase + static_cast<uint64_t>(vamp::ConsumableType::BloodVial), ContextMenuActionLabel(editor, kActionConsumableBase + static_cast<uint64_t>(vamp::ConsumableType::BloodVial), "Blood Vial") });
         break;
 
     case EditorContextMenuPage::PlaceObject:
-        itemItems.push_back({ 7099, "< Back" });
-        itemItems.push_back({ 1000, ContextMenuActionLabel(editor, 1000, "Hangar") });
-        itemItems.push_back({ 1001, ContextMenuActionLabel(editor, 1001, "Wall Vertical") });
+        itemItems.push_back({ kActionBack, "< Back" });
+        for (size_t i = 0; i < editor.objectAssets.size(); ++i)
+        {
+            const EditorObjectAsset& asset = editor.objectAssets[i];
+            itemItems.push_back({ asset.typeId,
+                ContextMenuActionLabel(editor, asset.typeId, asset.name.c_str()) });
+        }
         break;
 
     case EditorContextMenuPage::SelectedItem:
-        itemItems.push_back({ 7099, "< Back" });
+        itemItems.push_back({ kActionBack, "< Back" });
         if (editor.selectedGroundItemOrdinal >= 0 &&
             editor.selectedGroundItemOrdinal < static_cast<int>(groundItems.size()))
         {
-            itemItems.push_back({ 4000, ContextMenuActionLabel(editor, 4000, "Place On Selection") });
-            itemItems.push_back({ 9997, ContextMenuActionLabel(editor, 9997, "[Delete Selected Ground Item]") });
+            itemItems.push_back({ kActionCopySelectedItem, ContextMenuActionLabel(editor, kActionCopySelectedItem, "Place On Selection") });
+            itemItems.push_back({ kActionDeleteSelectedItem, ContextMenuActionLabel(editor, kActionDeleteSelectedItem, "[Delete Selected Ground Item]") });
         }
         break;
 
     case EditorContextMenuPage::SelectedObject:
-        itemItems.push_back({ 7099, "< Back" });
+        itemItems.push_back({ kActionBack, "< Back" });
         if (editor.selectedObjectIndex >= 0 &&
             editor.selectedObjectIndex < static_cast<int>(scene.objects.size()))
         {
-            itemItems.push_back({ 3000 + static_cast<int>(vamp::SceneObjectPlacement::YMin),    ContextMenuActionLabel(editor, 3000 + static_cast<int>(vamp::SceneObjectPlacement::YMin), "Placement: Y Min") });
-            itemItems.push_back({ 3000 + static_cast<int>(vamp::SceneObjectPlacement::YMiddle), ContextMenuActionLabel(editor, 3000 + static_cast<int>(vamp::SceneObjectPlacement::YMiddle), "Placement: Y Middle") });
-            itemItems.push_back({ 3000 + static_cast<int>(vamp::SceneObjectPlacement::YMax),    ContextMenuActionLabel(editor, 3000 + static_cast<int>(vamp::SceneObjectPlacement::YMax), "Placement: Y Max") });
-            itemItems.push_back({ 9998, ContextMenuActionLabel(editor, 9998, "[Delete Selected Object]") });
+            itemItems.push_back({ kActionPlacementYMin, ContextMenuActionLabel(editor, kActionPlacementYMin, "Placement: Y Min") });
+            itemItems.push_back({ kActionPlacementYMiddle, ContextMenuActionLabel(editor, kActionPlacementYMiddle, "Placement: Y Middle") });
+            itemItems.push_back({ kActionPlacementYMax, ContextMenuActionLabel(editor, kActionPlacementYMax, "Placement: Y Max") });
+            itemItems.push_back({ kActionDeleteSelectedObject, ContextMenuActionLabel(editor, kActionDeleteSelectedObject, "[Delete Selected Object]") });
         }
         break;
     }
@@ -833,15 +1003,17 @@ static bool HandleItemHotkey(const engine::InputSystem& input,
         return true;
     }
 
-    // Object placement: 1 = Hangar, 2 = Wall Vertical
-    if (input.IsKeyPressed('1') && !editor.selectedTiles.empty())
+    // Object placement: 1/2 place the first discovered object assets.
+    if (input.IsKeyPressed('1') && !editor.selectedTiles.empty() &&
+        !editor.objectAssets.empty())
     {
-        PlaceSelectedObject(scene, editor, vamp::SceneObjectType::Hangar, "");
+        PlaceSelectedObject(scene, editor, editor.objectAssets[0], "");
         return true;
     }
-    if (input.IsKeyPressed('2') && !editor.selectedTiles.empty())
+    if (input.IsKeyPressed('2') && !editor.selectedTiles.empty() &&
+        editor.objectAssets.size() > 1)
     {
-        PlaceSelectedObject(scene, editor, vamp::SceneObjectType::WallVert, "");
+        PlaceSelectedObject(scene, editor, editor.objectAssets[1], "");
         return true;
     }
 
@@ -999,7 +1171,7 @@ static void EditorUpdateOverlay(EditorState& editor,
             if (objectIndex >= 0 && objectIndex != editor.selectedObjectIndex)
             {
                 const vamp::SceneObject& obj = scene->objects[objectIndex];
-                ss << " | Object: " << SceneObjectDisplayName(obj.type)
+                ss << " | Object: " << SceneObjectDisplayName(editor, obj)
                    << " (" << SceneObjectPlacementName(obj.placement) << ")";
             }
         }
@@ -1011,7 +1183,7 @@ static void EditorUpdateOverlay(EditorState& editor,
     {
         std::ostringstream ss;
         ss << "LMB=Select Tile  Shift+LMB=Add  RMB=Context Menu  Wheel=Cycle Tile Items  "
-           << "P=Copy Selected Item  1/2=Objects  B/S/A/F/V=Consumables  "
+           << "P=Copy Selected Item  1/2=First Objects  B/S/A/F/V=Consumables  "
            << "F/T/R/W/L/D/M/H=Ground  Del=Delete Selected  Ctrl+S=Save  Esc=Cancel";
         if (editor.uiHintsLabel)
             editor.uiHintsLabel->SetText(ss.str());
@@ -1079,6 +1251,7 @@ static void EditorDrawWalls(engine::SceneRenderer& sceneRenderer,
 // ---------------------------------------------------------------------------
 void EditorInitUI(ui::UISystem& uiSystem, EditorState& editor)
 {
+    DiscoverEditorAssets(editor);
     LoadShortcutBindings(editor);
 
     // Semi-transparent panel in top-left corner
@@ -1116,14 +1289,11 @@ void EditorInitUI(ui::UISystem& uiSystem, EditorState& editor)
     // --- Terrain dropdown (shown when tiles are selected via LMB) ---
     {
         std::vector<ui::DropdownItem> terrainItems;
-        terrainItems.push_back({ static_cast<int>(vamp::TerrainType::Floor),      "Floor" });
-        terrainItems.push_back({ static_cast<int>(vamp::TerrainType::Street),     "Street" });
-        terrainItems.push_back({ static_cast<int>(vamp::TerrainType::Rubble),     "Rubble" });
-        terrainItems.push_back({ static_cast<int>(vamp::TerrainType::Water),      "Water" });
-        terrainItems.push_back({ static_cast<int>(vamp::TerrainType::Wall),       "Wall" });
-        terrainItems.push_back({ static_cast<int>(vamp::TerrainType::Door),       "Door" });
-        terrainItems.push_back({ static_cast<int>(vamp::TerrainType::MetroTrack), "Metro Track" });
-        terrainItems.push_back({ static_cast<int>(vamp::TerrainType::Shadow),     "Shadow" });
+        for (size_t i = 0; i < editor.terrainAssets.size(); ++i)
+        {
+            const EditorTerrainAsset& asset = editor.terrainAssets[i];
+            terrainItems.push_back({ asset.actionId, asset.name });
+        }
 
         editor.terrainDropdown = uiSystem.CreateDropdown(
             nullptr, "editor_terrain_dd",
@@ -1147,14 +1317,20 @@ void EditorInitUI(ui::UISystem& uiSystem, EditorState& editor)
 // ---------------------------------------------------------------------------
 // Apply terrain from dropdown selection
 // ---------------------------------------------------------------------------
-static void ApplyTerrainFromDropdown(int terrainId,
+static void ApplyTerrainFromDropdown(uint64_t terrainId,
                                       vamp::SceneData& scene,
                                       EditorState& editor,
                                       vamp::SceneLoader& sceneLoader,
                                       engine::OccluderSet& occluders,
                                       const engine::Grid& grid)
 {
-    vamp::TerrainType type = static_cast<vamp::TerrainType>(terrainId);
+    std::unordered_map<uint64_t, size_t>::const_iterator it =
+        editor.terrainAssetIndexByActionId.find(terrainId);
+    if (it == editor.terrainAssetIndexByActionId.end())
+        return;
+
+    const EditorTerrainAsset& asset = editor.terrainAssets[it->second];
+    vamp::TerrainType type = asset.terrain;
     bool losChanged = false;
     int applied = 0;
 
@@ -1183,7 +1359,7 @@ static void ApplyTerrainFromDropdown(int terrainId,
 
         std::ostringstream ss;
         ss << "[Editor] " << applied << " tile(s) -> "
-           << EditorTerrainName(type) << " (dropdown)\n";
+           << asset.name << " (dropdown)\n";
         OutputDebugStringA(ss.str().c_str());
     }
     SyncFocusedTileSelection(scene, editor);
@@ -1192,7 +1368,7 @@ static void ApplyTerrainFromDropdown(int terrainId,
 // ---------------------------------------------------------------------------
 // Apply item placement from dropdown selection
 // ---------------------------------------------------------------------------
-static void ApplyItemFromDropdown(int itemId,
+static void ApplyItemFromDropdown(uint64_t itemId,
                                    vamp::SceneData& scene,
                                    EditorState& editor,
                                    vamp::SceneLoader& sceneLoader,
@@ -1201,27 +1377,27 @@ static void ApplyItemFromDropdown(int itemId,
 {
     SyncFocusedTileSelection(scene, editor);
 
-    if (itemId == 7099)
+    if (itemId == kActionBack)
     {
         editor.contextMenuPage = EditorContextMenuPage::Root;
         return;
     }
 
-    if (itemId == 7000) { editor.contextMenuPage = EditorContextMenuPage::Ground; return; }
-    if (itemId == 7001) { editor.contextMenuPage = EditorContextMenuPage::PlaceItem; return; }
-    if (itemId == 7002) { editor.contextMenuPage = EditorContextMenuPage::PlaceObject; return; }
-    if (itemId == 7003) { editor.contextMenuPage = EditorContextMenuPage::SelectedItem; return; }
-    if (itemId == 7004) { editor.contextMenuPage = EditorContextMenuPage::SelectedObject; return; }
+    if (itemId == kActionRootGround) { editor.contextMenuPage = EditorContextMenuPage::Ground; return; }
+    if (itemId == kActionRootPlaceItem) { editor.contextMenuPage = EditorContextMenuPage::PlaceItem; return; }
+    if (itemId == kActionRootPlaceObject) { editor.contextMenuPage = EditorContextMenuPage::PlaceObject; return; }
+    if (itemId == kActionRootSelectedItem) { editor.contextMenuPage = EditorContextMenuPage::SelectedItem; return; }
+    if (itemId == kActionRootSelectedObject) { editor.contextMenuPage = EditorContextMenuPage::SelectedObject; return; }
 
-    if (itemId >= 5000 && itemId < 6000)
+    if (editor.terrainAssetIndexByActionId.find(itemId) != editor.terrainAssetIndexByActionId.end())
     {
-        ApplyTerrainFromDropdown(itemId - 5000, scene, editor, sceneLoader, occluders, grid);
+        ApplyTerrainFromDropdown(itemId, scene, editor, sceneLoader, occluders, grid);
         SyncFocusedTileSelection(scene, editor);
         editor.contextMenuPage = EditorContextMenuPage::Ground;
         return;
     }
 
-    if (itemId == 4000)
+    if (itemId == kActionCopySelectedItem)
     {
         int tx = 0;
         int ty = 0;
@@ -1255,7 +1431,7 @@ static void ApplyItemFromDropdown(int itemId,
         return;
     }
 
-    if (itemId == 9997)
+    if (itemId == kActionDeleteSelectedItem)
     {
         int tx = 0;
         int ty = 0;
@@ -1276,24 +1452,29 @@ static void ApplyItemFromDropdown(int itemId,
         return;
     }
 
-    if (itemId >= 3000 && itemId < 3010 &&
+    if ((itemId == kActionPlacementYMin ||
+         itemId == kActionPlacementYMiddle ||
+         itemId == kActionPlacementYMax) &&
         editor.selectedObjectIndex >= 0 &&
         editor.selectedObjectIndex < static_cast<int>(scene.objects.size()))
     {
-        vamp::SceneObjectPlacement placement =
-            static_cast<vamp::SceneObjectPlacement>(itemId - 3000);
+        vamp::SceneObjectPlacement placement = vamp::SceneObjectPlacement::YMax;
+        if (itemId == kActionPlacementYMin)
+            placement = vamp::SceneObjectPlacement::YMin;
+        else if (itemId == kActionPlacementYMiddle)
+            placement = vamp::SceneObjectPlacement::YMiddle;
         scene.objects[editor.selectedObjectIndex].placement = placement;
         editor.dirty = true;
 
         std::ostringstream ss;
-        ss << "[Editor] " << SceneObjectDisplayName(scene.objects[editor.selectedObjectIndex].type)
+        ss << "[Editor] " << SceneObjectDisplayName(editor, scene.objects[editor.selectedObjectIndex])
            << " placement -> " << SceneObjectPlacementName(placement) << " (dropdown)\n";
         OutputDebugStringA(ss.str().c_str());
         editor.contextMenuPage = EditorContextMenuPage::SelectedObject;
         return;
     }
 
-    if (itemId == 9998 &&
+    if (itemId == kActionDeleteSelectedObject &&
         editor.selectedObjectIndex >= 0 &&
         editor.selectedObjectIndex < static_cast<int>(scene.objects.size()))
     {
@@ -1307,7 +1488,7 @@ static void ApplyItemFromDropdown(int itemId,
     }
 
     // Delete action
-    if (itemId == 9999)
+    if (itemId == kActionDeleteFirst)
     {
         int deleted = 0;
         for (const auto& tc : editor.selectedTiles)
@@ -1348,24 +1529,23 @@ static void ApplyItemFromDropdown(int itemId,
         return;
     }
 
-    // Object placements
-    if (itemId == 1000 && !editor.selectedTiles.empty())
+    if (!editor.selectedTiles.empty())
     {
-        PlaceSelectedObject(scene, editor, vamp::SceneObjectType::Hangar, "(dropdown)");
-        editor.contextMenuPage = EditorContextMenuPage::Root;
-        return;
-    }
-    if (itemId == 1001 && !editor.selectedTiles.empty())
-    {
-        PlaceSelectedObject(scene, editor, vamp::SceneObjectType::WallVert, "(dropdown)");
-        editor.contextMenuPage = EditorContextMenuPage::Root;
-        return;
+        std::unordered_map<uint64_t, size_t>::const_iterator objectIt =
+            editor.objectAssetIndexByTypeId.find(itemId);
+        if (objectIt != editor.objectAssetIndexByTypeId.end())
+        {
+            PlaceSelectedObject(scene, editor, editor.objectAssets[objectIt->second], "(dropdown)");
+            editor.contextMenuPage = EditorContextMenuPage::Root;
+            return;
+        }
     }
 
-    // Consumable placement (IDs 2000+)
-    if (itemId >= 2000 && itemId < 3000)
+    // Consumable placement
+    if (itemId >= kActionConsumableBase &&
+        itemId < kActionConsumableBase + 1000)
     {
-        vamp::ConsumableType ctype = static_cast<vamp::ConsumableType>(itemId - 2000);
+        vamp::ConsumableType ctype = static_cast<vamp::ConsumableType>(itemId - kActionConsumableBase);
         int placed = 0;
         for (const auto& tc : editor.selectedTiles)
         {
@@ -1499,9 +1679,9 @@ void EditorFrame(engine::RendererD3D12& renderer,
 
         if (editor.itemDropdown && editor.itemDropdown->IsOpen())
         {
-            const int hoveredActionId = editor.itemDropdown->GetHoveredItemId();
+            const uint64_t hoveredActionId = editor.itemDropdown->GetHoveredItemId();
             const int pressedShortcut = GetFirstPressedAssignableShortcutKey(input);
-            if (hoveredActionId >= 0 &&
+            if (hoveredActionId != 0 &&
                 pressedShortcut != 0 &&
                 IsAssignableShortcutAction(hoveredActionId))
             {
@@ -1543,21 +1723,24 @@ void EditorFrame(engine::RendererD3D12& renderer,
             float my = static_cast<float>(input.GetMouseY());
 
             // Pending selection from dropdown callback
-            static int s_pendingTerrainId = -1;
-            static int s_pendingItemId    = -1;
+            static uint64_t s_pendingItemId = 0;
 
             // Set up one-shot callbacks
             if (editor.itemDropdown && editor.itemDropdown->IsVisible())
             {
                 editor.itemDropdown->SetOnSelect(
-                    [](int id, const std::string&) { s_pendingItemId = id; });
+                    [](uint64_t id, const std::string&) { s_pendingItemId = id; });
                 if (editor.itemDropdown->HandleClick(mx, my))
                 {
-                    if (s_pendingItemId >= 0 && sceneLoader.IsLoaded())
+                    if (s_pendingItemId != 0 && sceneLoader.IsLoaded())
                     {
                         const bool reopenForNavigation =
-                            (s_pendingItemId == 7099) ||
-                            (s_pendingItemId >= 7000 && s_pendingItemId <= 7004);
+                            (s_pendingItemId == kActionBack) ||
+                            (s_pendingItemId == kActionRootGround) ||
+                            (s_pendingItemId == kActionRootPlaceItem) ||
+                            (s_pendingItemId == kActionRootPlaceObject) ||
+                            (s_pendingItemId == kActionRootSelectedItem) ||
+                            (s_pendingItemId == kActionRootSelectedObject);
                         ApplyItemFromDropdown(s_pendingItemId,
                             sceneLoader.GetSceneData(), editor,
                             sceneLoader, occluders, grid);
@@ -1568,7 +1751,7 @@ void EditorFrame(engine::RendererD3D12& renderer,
                             editor.itemDropdown->Open();
                         }
                     }
-                    s_pendingItemId = -1;
+                    s_pendingItemId = 0;
                     leftClickConsumedByUI = true;
                 }
             }
@@ -1729,15 +1912,15 @@ static void EnsureTerrainTexture(EditorState& editor,
     if (editor.terrainTexturesLoaded[idx])
         return;
 
-    wchar_t exePath[MAX_PATH];
-    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-    std::wstring dir(exePath);
-    size_t sl = dir.find_last_of(L"\\/");
-    if (sl != std::wstring::npos)
-        dir = dir.substr(0, sl + 1);
+    if (editor.terrainTexturePaths[idx].empty())
+    {
+        editor.terrainTexturesLoaded[idx] = true;
+        return;
+    }
 
-    const char* imagePath = TerrainTexturePath(terrain);
-    std::wstring widePath(imagePath, imagePath + std::strlen(imagePath));
+    const std::wstring dir = GetExecutableDirectory();
+    const std::string& imagePath = editor.terrainTexturePaths[idx];
+    std::wstring widePath(imagePath.begin(), imagePath.end());
     std::wstring fullPath = dir + widePath;
 
     if (editor.terrainTextures[idx].LoadFromPNG(
@@ -1776,20 +1959,46 @@ static void EditorSubmitGroundTiles(EditorState& editor,
                 continue;
 
             auto center = grid.TileToWorld(x, y);
+            float drawW = static_cast<float>(editor.terrainTextures[texIdx].GetWidth());
+            float drawH = static_cast<float>(editor.terrainTextures[texIdx].GetHeight());
+
+            if (drawW <= 0.0f || drawH <= 0.0f)
+                continue;
+
             DirectX::XMFLOAT2 top, right, bottom, left;
             grid.TileDiamondVertices(x, y, top, right, bottom, left);
+            const float maxW = right.x - left.x;
+            const float maxH = bottom.y - top.y;
+            float scale = 1.0f;
+            if (drawW > maxW || drawH > maxH)
+            {
+                scale = (std::min)(maxW / drawW, maxH / drawH);
+                drawW *= scale;
+                drawH *= scale;
+            }
+
+            const float tileBottomY = bottom.y;
+            const uint16_t tileOrder = static_cast<uint16_t>(((y & 0xFF) << 8) | (x & 0xFF));
+
+            // Hex grids are 3-colorable: no two adjacent tiles share the
+            // same color.  For flat-top, odd-shift-down offset coordinates
+            // the following gives a valid 3-coloring:
+            //   color = (x + 2*y + (x&1)) mod 3
+            // This guarantees every pair of hex neighbors gets a different
+            // depth, eliminating z-fighting flicker on overlapping sprites.
+            const int hexColor = ((x % 3) + 2 * (y % 3) + (x & 1)) % 3;
 
             engine::SpriteInstance inst;
             inst.position = center;
-            inst.size = { right.x - left.x, bottom.y - top.y };
+            inst.size = { drawW, drawH };
             inst.uvRect = { 0.0f, 0.0f, 1.0f, 1.0f };
             inst.color = { 1.0f, 1.0f, 1.0f, 1.0f };
             inst.rotation = 0.0f;
-            inst.sortY = center.y;
+            inst.sortY = tileBottomY;
             inst.textureIndex = editor.terrainTextures[texIdx].GetSRVIndex();
-            inst.pad = 0;
+            inst.depthZ = 0.80f + 0.02f * static_cast<float>(hexColor);
 
-            renderQueue.Submit(engine::RenderLayer::GroundTiles, inst.sortY, 0, 0, inst);
+            renderQueue.Submit(engine::RenderLayer::GroundTiles, inst.sortY, 0, tileOrder, inst);
         }
     }
 }
@@ -1797,67 +2006,79 @@ static void EditorSubmitGroundTiles(EditorState& editor,
 // ---------------------------------------------------------------------------
 // Load object texture on demand (called during render with active cmd list)
 // ---------------------------------------------------------------------------
-static void EnsureObjectTexture(EditorState& editor,
-    vamp::SceneObjectType type,
+static engine::Texture2D* EnsureObjectTexture(EditorState& editor,
     const char* imagePath,
     engine::RendererD3D12& renderer) {
-    int idx = static_cast<int>(type);
-    if (editor.objectTexturesLoaded[idx])
-        return;
+    if (imagePath == nullptr || imagePath[0] == '\0')
+        return nullptr;
+
+    EditorObjectTextureCacheEntry* cache = nullptr;
+    for (size_t i = 0; i < editor.objectTextureCache.size(); ++i)
+    {
+        EditorObjectTextureCacheEntry& entry = editor.objectTextureCache[i];
+        if (entry.imagePath == imagePath)
+        {
+            cache = &entry;
+            if (entry.loaded)
+                return entry.texture.IsValid() ? &entry.texture : nullptr;
+            break;
+        }
+    }
+
+    if (cache == nullptr)
+    {
+        editor.objectTextureCache.push_back(EditorObjectTextureCacheEntry());
+        cache = &editor.objectTextureCache.back();
+        cache->imagePath = imagePath;
+    }
 
     // Resolve path relative to executable directory
-    wchar_t exePath[MAX_PATH];
-    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-    std::wstring dir(exePath);
-    size_t sl = dir.find_last_of(L"\\/");
-    if (sl != std::wstring::npos)
-        dir = dir.substr(0, sl + 1);
+    const std::wstring dir = GetExecutableDirectory();
 
     std::wstring widePath(imagePath, imagePath + std::strlen(imagePath));
     std::wstring fullPath = dir + widePath;
 
-    if (editor.objectTextures[idx].LoadFromPNG(
+    if (cache->texture.LoadFromPNG(
         renderer.GetDevice(), renderer.GetCommandList(),
         renderer.GetUploadManager(), renderer.GetSRVHeap(), fullPath)) {
-        editor.objectTexturesLoaded[idx] = true;
+        cache->loaded = true;
 
         std::ostringstream ss;
         ss << "[Editor] Loaded object texture: " << imagePath << "\n";
         OutputDebugStringA(ss.str().c_str());
+        return &cache->texture;
     }
-    else {
-        // PNG not found -- generate a placeholder texture so the object is visible
-        const uint32_t kSize = 32;
-        std::vector<uint8_t> pixels(kSize * kSize * 4);
-        for (uint32_t i = 0; i < kSize * kSize; ++i)
-        {
-            pixels[i * 4 + 0] = 60;   // R
-            pixels[i * 4 + 1] = 100;  // G
-            pixels[i * 4 + 2] = 180;  // B
-            pixels[i * 4 + 3] = 200;  // A
-        }
 
-        if (editor.objectTextures[idx].CreateFromRGBA(
-                renderer.GetDevice(), renderer.GetCommandList(),
-                renderer.GetUploadManager(), renderer.GetSRVHeap(),
-                kSize, kSize, pixels.data()))
-        {
-            editor.objectTexturesLoaded[idx] = true;
-
-            std::ostringstream ss;
-            ss << "[Editor] PNG not found, using placeholder for: " << imagePath << "\n";
-            OutputDebugStringA(ss.str().c_str());
-        }
-        else
-        {
-            // Mark as loaded to avoid retrying every frame
-            editor.objectTexturesLoaded[idx] = true;
-
-            std::ostringstream ss;
-            ss << "[Editor] ERROR: Failed to create placeholder texture for: " << imagePath << "\n";
-            OutputDebugStringA(ss.str().c_str());
-        }
+    // PNG not found -- generate a placeholder texture so the object is visible
+    const uint32_t kSize = 32;
+    std::vector<uint8_t> pixels(kSize * kSize * 4);
+    for (uint32_t i = 0; i < kSize * kSize; ++i)
+    {
+        pixels[i * 4 + 0] = 60;
+        pixels[i * 4 + 1] = 100;
+        pixels[i * 4 + 2] = 180;
+        pixels[i * 4 + 3] = 200;
     }
+
+    if (cache->texture.CreateFromRGBA(
+            renderer.GetDevice(), renderer.GetCommandList(),
+            renderer.GetUploadManager(), renderer.GetSRVHeap(),
+            kSize, kSize, pixels.data()))
+    {
+        cache->loaded = true;
+
+        std::ostringstream ss;
+        ss << "[Editor] PNG not found, using placeholder for: " << imagePath << "\n";
+        OutputDebugStringA(ss.str().c_str());
+        return &cache->texture;
+    }
+
+    cache->loaded = true;
+
+    std::ostringstream ss;
+    ss << "[Editor] ERROR: Failed to create placeholder texture for: " << imagePath << "\n";
+    OutputDebugStringA(ss.str().c_str());
+    return nullptr;
 }
 
 // ---------------------------------------------------------------------------
@@ -1870,11 +2091,8 @@ static void EditorSubmitObjects(EditorState& editor,
     engine::RendererD3D12& renderer) {
     for (size_t objIndex = 0; objIndex < scene.objects.size(); ++objIndex) {
         const auto& obj = scene.objects[objIndex];
-        int idx = static_cast<int>(obj.type);
-        EnsureObjectTexture(editor, obj.type, obj.imagePath, renderer);
-
-        if (!editor.objectTexturesLoaded[idx] ||
-            !editor.objectTextures[idx].IsValid())
+        engine::Texture2D* objectTexture = EnsureObjectTexture(editor, obj.imagePath, renderer);
+        if (objectTexture == nullptr || !objectTexture->IsValid())
             continue;
 
         float minX = 1e30f;
@@ -1919,8 +2137,8 @@ static void EditorSubmitObjects(EditorState& editor,
 
         float drawW = spanX;
         float drawH = spanY;
-        const float texW = static_cast<float>(editor.objectTextures[idx].GetWidth());
-        const float texH = static_cast<float>(editor.objectTextures[idx].GetHeight());
+        const float texW = static_cast<float>(objectTexture->GetWidth());
+        const float texH = static_cast<float>(objectTexture->GetHeight());
         if (texW > 0.0f && texH > 0.0f)
         {
             const float texAspect = texW / texH;
@@ -1949,8 +2167,8 @@ static void EditorSubmitObjects(EditorState& editor,
         inst.color = {1.0f, 1.0f, 1.0f, 0.85f};
         inst.rotation = 0.0f;
         inst.sortY = cy;
-        inst.textureIndex = editor.objectTextures[idx].GetSRVIndex();
-        inst.pad = 0;
+        inst.textureIndex = objectTexture->GetSRVIndex();
+        inst.depthZ = 0.60f;
 
         // Use the object index as a stable tie-breaker when overlapping objects
         // resolve to the same Y-sort value.

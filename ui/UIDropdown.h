@@ -14,6 +14,7 @@
 #include <functional>
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 
 namespace ui
 {
@@ -23,7 +24,7 @@ namespace ui
 // ---------------------------------------------------------------------------
 struct DropdownItem
 {
-    int         id   = 0;       // Application-defined identifier
+    uint64_t    id   = 0;       // Application-defined identifier
     std::string label;          // Display text
 };
 
@@ -40,7 +41,7 @@ public:
     void SetItems(const std::vector<DropdownItem>& items) { m_items = items; }
 
     // Set the selection callback (fires when an item is clicked)
-    void SetOnSelect(std::function<void(int id, const std::string& label)> cb)
+    void SetOnSelect(std::function<void(uint64_t id, const std::string& label)> cb)
     {
         m_onSelect = cb;
     }
@@ -160,23 +161,23 @@ public:
     // Set the current mouse position for hover highlighting
     void SetMousePos(float px, float py) { m_mouseX = px; m_mouseY = py; }
 
-    int GetHoveredItemId() const
+    uint64_t GetHoveredItemId() const
     {
         if (!m_open)
-            return -1;
+            return 0;
 
         Rect dropRect = GetDropdownRect();
         if (!dropRect.Contains(m_mouseX, m_mouseY))
-            return -1;
+            return 0;
 
         float listTop = dropRect.y + m_rowHeight;
         if (m_mouseY < listTop)
-            return -1;
+            return 0;
 
         int rowIndex = static_cast<int>((m_mouseY - listTop) / m_rowHeight);
         rowIndex += m_scrollOffset;
         if (rowIndex < 0 || rowIndex >= static_cast<int>(m_filtered.size()))
-            return -1;
+            return 0;
 
         return m_filtered[rowIndex].id;
     }
@@ -308,7 +309,7 @@ private:
     const BitmapFont*   m_font          = nullptr;
     std::vector<DropdownItem> m_items;
     std::vector<DropdownItem> m_filtered;
-    std::function<void(int, const std::string&)> m_onSelect;
+    std::function<void(uint64_t, const std::string&)> m_onSelect;
     std::string         m_placeholder   = "Select...";
     std::string         m_searchText;
     bool                m_open          = false;

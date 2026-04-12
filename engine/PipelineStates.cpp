@@ -273,7 +273,7 @@ bool PipelineStates::CreateSpritePSO(ID3D12Device* device, const std::wstring& s
         { "INST_ROT",    0, DXGI_FORMAT_R32_FLOAT,          1, 48, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
         { "INST_SORTY",  0, DXGI_FORMAT_R32_FLOAT,          1, 52, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
         { "INST_TEX",    0, DXGI_FORMAT_R32_UINT,           1, 56, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
-        { "INST_PAD",    0, DXGI_FORMAT_R32_UINT,           1, 60, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+        { "INST_DEPTH",  0, DXGI_FORMAT_R32_FLOAT,          1, 60, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
     };
 
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
@@ -284,12 +284,15 @@ bool PipelineStates::CreateSpritePSO(ID3D12Device* device, const std::wstring& s
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     psoDesc.NumRenderTargets      = 1;
     psoDesc.RTVFormats[0]         = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+    psoDesc.DSVFormat             = DXGI_FORMAT_D24_UNORM_S8_UINT;
     psoDesc.SampleDesc            = { 1, 0 };
     psoDesc.SampleMask            = UINT_MAX;
     psoDesc.RasterizerState.FillMode              = D3D12_FILL_MODE_SOLID;
     psoDesc.RasterizerState.CullMode              = D3D12_CULL_MODE_NONE;
     psoDesc.RasterizerState.DepthClipEnable       = TRUE;
-    psoDesc.DepthStencilState.DepthEnable         = FALSE;
+    psoDesc.DepthStencilState.DepthEnable         = TRUE;
+    psoDesc.DepthStencilState.DepthWriteMask      = D3D12_DEPTH_WRITE_MASK_ALL;
+    psoDesc.DepthStencilState.DepthFunc           = D3D12_COMPARISON_FUNC_LESS_EQUAL;
     psoDesc.DepthStencilState.StencilEnable       = FALSE;
 
     // Alpha blending
@@ -322,7 +325,7 @@ bool PipelineStates::CreateSpriteScreenPSO(ID3D12Device* device, const std::wstr
         { "INST_ROT",    0, DXGI_FORMAT_R32_FLOAT,          1, 48, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
         { "INST_SORTY",  0, DXGI_FORMAT_R32_FLOAT,          1, 52, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
         { "INST_TEX",    0, DXGI_FORMAT_R32_UINT,           1, 56, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
-        { "INST_PAD",    0, DXGI_FORMAT_R32_UINT,           1, 60, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+        { "INST_DEPTH",  0, DXGI_FORMAT_R32_FLOAT,          1, 60, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
     };
 
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
@@ -370,7 +373,7 @@ bool PipelineStates::CreateSpriteScreenPointPSO(ID3D12Device* device, const std:
         { "INST_ROT",    0, DXGI_FORMAT_R32_FLOAT,          1, 48, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
         { "INST_SORTY",  0, DXGI_FORMAT_R32_FLOAT,          1, 52, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
         { "INST_TEX",    0, DXGI_FORMAT_R32_UINT,           1, 56, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
-        { "INST_PAD",    0, DXGI_FORMAT_R32_UINT,           1, 60, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+        { "INST_DEPTH",  0, DXGI_FORMAT_R32_FLOAT,          1, 60, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
     };
 
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
@@ -416,7 +419,7 @@ bool PipelineStates::CreateShadowVolumePSO(ID3D12Device* device, const std::wstr
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
     psoDesc.pRootSignature        = m_mainRootSig.Get();
     psoDesc.VS                    = { vs->GetBufferPointer(), vs->GetBufferSize() };
-    // No pixel shader — color writes off
+    // No pixel shader ï¿½ color writes off
     psoDesc.InputLayout           = { inputLayout, _countof(inputLayout) };
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     psoDesc.NumRenderTargets      = 0; // No color output
@@ -457,7 +460,7 @@ bool PipelineStates::CreateLightRadialPSO(ID3D12Device* device, const std::wstri
     psoDesc.pRootSignature        = m_lightRootSig.Get();
     psoDesc.VS                    = { vs->GetBufferPointer(), vs->GetBufferSize() };
     psoDesc.PS                    = { ps->GetBufferPointer(), ps->GetBufferSize() };
-    psoDesc.InputLayout           = { nullptr, 0 }; // No input — uses SV_VertexID
+    psoDesc.InputLayout           = { nullptr, 0 }; // No input ï¿½ uses SV_VertexID
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     psoDesc.NumRenderTargets      = 1;
     psoDesc.RTVFormats[0]         = DXGI_FORMAT_R11G11B10_FLOAT;
@@ -507,7 +510,7 @@ bool PipelineStates::CreateCompositePSO(ID3D12Device* device, const std::wstring
     psoDesc.pRootSignature        = m_compositeRootSig.Get();
     psoDesc.VS                    = { vs->GetBufferPointer(), vs->GetBufferSize() };
     psoDesc.PS                    = { ps->GetBufferPointer(), ps->GetBufferSize() };
-    psoDesc.InputLayout           = { nullptr, 0 }; // Fullscreen triangle — no vertex input
+    psoDesc.InputLayout           = { nullptr, 0 }; // Fullscreen triangle ï¿½ no vertex input
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     psoDesc.NumRenderTargets      = 1;
     psoDesc.RTVFormats[0]         = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -519,7 +522,7 @@ bool PipelineStates::CreateCompositePSO(ID3D12Device* device, const std::wstring
     psoDesc.DepthStencilState.DepthEnable         = FALSE;
     psoDesc.DepthStencilState.StencilEnable       = FALSE;
 
-    // No blending — overwrite
+    // No blending ï¿½ overwrite
     auto& blend = psoDesc.BlendState.RenderTarget[0];
     blend.BlendEnable           = FALSE;
     blend.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;

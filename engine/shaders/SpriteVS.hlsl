@@ -27,7 +27,7 @@ struct VSInput
     float  instanceRotation : INST_ROT;
     float  instanceSortY    : INST_SORTY;
     uint   instanceTexIndex : INST_TEX;
-    uint   instancePad      : INST_PAD;
+    float  instanceDepth    : INST_DEPTH;
 };
 
 struct VSOutput
@@ -58,7 +58,7 @@ VSOutput main(VSInput input)
     // Scale and translate
     float2 worldPos = input.instancePos + rotated * input.instanceSize;
 
-    output.position = mul(float4(worldPos, 0.0f, 1.0f), viewProjection);
+    output.position = mul(float4(worldPos, input.instanceDepth, 1.0f), viewProjection);
 
     // UV interpolation
     float2 uvCorner;

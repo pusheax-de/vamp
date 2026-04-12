@@ -60,7 +60,7 @@ struct SpriteInstance
     float              rotation;     // Radians
     float              sortY;        // For Y-sorting within a layer
     uint32_t           textureIndex; // Index into descriptor table
-    uint32_t           pad;
+    float              depthZ;       // Orthographic depth in [0, 1]
 };
 
 // ---------------------------------------------------------------------------

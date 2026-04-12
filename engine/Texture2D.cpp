@@ -12,6 +12,73 @@
 namespace engine
 {
 
+namespace
+{
+
+void FixTransparentPixelBleed(std::vector<uint8_t>& pixels, uint32_t width, uint32_t height)
+{
+    if (pixels.empty() || width == 0 || height == 0)
+        return;
+
+    std::vector<uint8_t> fixed = pixels;
+    const int maxRadius = static_cast<int>((std::max)(width, height));
+
+    for (uint32_t y = 0; y < height; ++y)
+    {
+        for (uint32_t x = 0; x < width; ++x)
+        {
+            const size_t idx = static_cast<size_t>(y) * width * 4 + static_cast<size_t>(x) * 4;
+            if (pixels[idx + 3] != 0)
+                continue;
+
+            bool found = false;
+            for (int radius = 1; radius < maxRadius && !found; ++radius)
+            {
+                const int minX = (std::max)(0, static_cast<int>(x) - radius);
+                const int maxX = (std::min)(static_cast<int>(width) - 1, static_cast<int>(x) + radius);
+                const int minY = (std::max)(0, static_cast<int>(y) - radius);
+                const int maxY = (std::min)(static_cast<int>(height) - 1, static_cast<int>(y) + radius);
+
+                uint32_t sumR = 0;
+                uint32_t sumG = 0;
+                uint32_t sumB = 0;
+                uint32_t count = 0;
+
+                for (int sy = minY; sy <= maxY; ++sy)
+                {
+                    for (int sx = minX; sx <= maxX; ++sx)
+                    {
+                        if (sx != minX && sx != maxX && sy != minY && sy != maxY)
+                            continue;
+
+                        const size_t sampleIdx =
+                            (static_cast<size_t>(sy) * width + static_cast<size_t>(sx)) * 4;
+                        if (pixels[sampleIdx + 3] == 0)
+                            continue;
+
+                        sumR += pixels[sampleIdx + 0];
+                        sumG += pixels[sampleIdx + 1];
+                        sumB += pixels[sampleIdx + 2];
+                        ++count;
+                    }
+                }
+
+                if (count > 0)
+                {
+                    fixed[idx + 0] = static_cast<uint8_t>(sumR / count);
+                    fixed[idx + 1] = static_cast<uint8_t>(sumG / count);
+                    fixed[idx + 2] = static_cast<uint8_t>(sumB / count);
+                    found = true;
+                }
+            }
+        }
+    }
+
+    pixels.swap(fixed);
+}
+
+} // namespace
+
 // ---------------------------------------------------------------------------
 // DDS file structures (minimal, for loading BC7/BC3/BC1)
 // ---------------------------------------------------------------------------
@@ -374,6 +441,8 @@ bool Texture2D::LoadFromPNG(ID3D12Device* device,
 
     if (FAILED(hr))
         return false;
+
+    FixTransparentPixelBleed(pixels, imgWidth, imgHeight);
 
     // Use the existing RGBA upload path
     return CreateFromRGBA(device, cmdList, uploadMgr, srvHeap,

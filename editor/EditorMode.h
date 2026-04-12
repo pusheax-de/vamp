@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <unordered_map>
 
 // ---------------------------------------------------------------------------
 // Editor selection mode
@@ -46,8 +47,30 @@ struct TileCoord
 
 struct EditorShortcutBinding
 {
-    int actionId = -1;
-    int vk = 0;
+    uint64_t actionId = 0;
+    int      vk = 0;
+};
+
+struct EditorTerrainAsset
+{
+    uint64_t          actionId = 0;
+    vamp::TerrainType terrain = vamp::TerrainType::Floor;
+    std::string       name;
+    std::string       imagePath;
+};
+
+struct EditorObjectAsset
+{
+    uint64_t    typeId = 0;
+    std::string name;
+    std::string imagePath;
+};
+
+struct EditorObjectTextureCacheEntry
+{
+    std::string       imagePath;
+    engine::Texture2D texture;
+    bool              loaded = false;
 };
 
 // ---------------------------------------------------------------------------
@@ -78,14 +101,18 @@ struct EditorState
     ui::UIDropdown*         terrainDropdown = nullptr;
     ui::UIDropdown*         itemDropdown    = nullptr;
     std::vector<EditorShortcutBinding> shortcutBindings;
+    std::vector<EditorTerrainAsset> terrainAssets;
+    std::vector<EditorObjectAsset>  objectAssets;
+    std::unordered_map<uint64_t, size_t> terrainAssetIndexByActionId;
+    std::unordered_map<uint64_t, size_t> objectAssetIndexByTypeId;
 
     // Terrain textures (loaded on demand, keyed by TerrainType)
     engine::Texture2D   terrainTextures[static_cast<int>(vamp::TerrainType::COUNT)];
     bool                terrainTexturesLoaded[static_cast<int>(vamp::TerrainType::COUNT)] = {};
+    std::string         terrainTexturePaths[static_cast<int>(vamp::TerrainType::COUNT)];
 
-    // Object textures (loaded on demand, keyed by SceneObjectType)
-    engine::Texture2D   objectTextures[static_cast<int>(vamp::SceneObjectType::COUNT)];
-    bool                objectTexturesLoaded[static_cast<int>(vamp::SceneObjectType::COUNT)] = {};
+    // Object textures (loaded on demand, keyed by image path)
+    std::vector<EditorObjectTextureCacheEntry> objectTextureCache;
 
     void ShutdownTextures(engine::PersistentDescriptorAllocator& srvHeap)
     {
@@ -98,14 +125,15 @@ struct EditorState
             }
         }
 
-        for (int i = 0; i < static_cast<int>(vamp::SceneObjectType::COUNT); ++i)
+        for (auto& entry : objectTextureCache)
         {
-            if (objectTexturesLoaded[i])
+            if (entry.loaded)
             {
-                objectTextures[i].Shutdown(srvHeap);
-                objectTexturesLoaded[i] = false;
+                entry.texture.Shutdown(srvHeap);
+                entry.loaded = false;
             }
         }
+        objectTextureCache.clear();
     }
 
     void ClearSelection()

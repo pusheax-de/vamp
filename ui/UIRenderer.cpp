@@ -148,7 +148,7 @@ void UIRenderer::DrawRect(const Rect& rect, const Color& color)
     inst.rotation     = 0.0f;
     inst.sortY        = 0.0f;
     inst.textureIndex = m_whiteTexture.GetSRVIndex();
-    inst.pad          = 0;
+    inst.depthZ       = 0.0f;
 
     GetBatch(m_whiteTexture.GetSRVIndex()).instances.push_back(inst);
 }
@@ -182,7 +182,7 @@ void UIRenderer::DrawText(const BitmapFont& font, const char* text,
             inst.rotation     = 0.0f;
             inst.sortY        = 0.0f;
             inst.textureIndex = texIdx;
-            inst.pad          = 0;
+            inst.depthZ       = 0.0f;
 
             batch.instances.push_back(inst);
         }
