@@ -45,6 +45,7 @@ struct TileInspection
     // Items on the ground
     std::vector<const SceneGroundItem*> groundItems;
     std::vector<const SceneQuestItem*>  questItems;
+    std::vector<const SceneLight*>      lights;
 
     // Zones that overlap this tile
     std::vector<const SceneTrigger*>    triggers;
@@ -143,7 +144,7 @@ private:
     void BuildOccluders(engine::OccluderSet& occluders, const engine::Grid& grid) const;
 
     // Populate engine lights from scene data
-    void BuildLights(engine::LightSystem& lights) const;
+    void BuildLights(engine::LightSystem& lights, const engine::Grid& grid) const;
 
     // Populate engine roofs from scene data
     void BuildRoofs(engine::RoofSystem& roofs) const;

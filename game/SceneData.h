@@ -33,7 +33,7 @@ namespace vamp
 // File header
 // ---------------------------------------------------------------------------
 static const uint32_t kSceneMagic   = 0x31504D56; // "VMP1" in little-endian
-static const uint32_t kSceneVersion = 4;
+static const uint32_t kSceneVersion = 5;
 
 struct SceneHeader
 {
@@ -138,6 +138,8 @@ struct SceneQuestItem
 // ---------------------------------------------------------------------------
 struct SceneLight
 {
+    int32_t     tileX       = -1;
+    int32_t     tileY       = -1;
     float       worldX      = 0.0f;
     float       worldY      = 0.0f;
     float       r = 1.0f, g = 1.0f, b = 1.0f;

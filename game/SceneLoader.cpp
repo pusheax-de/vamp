@@ -44,7 +44,7 @@ bool SceneLoader::LoadScene(const std::string& filePath,
     BuildOccluders(occluders, grid);
 
     // --- Populate lights ---
-    BuildLights(lights);
+    BuildLights(lights, grid);
 
     // --- Populate roofs ---
     BuildRoofs(roofs);
@@ -111,6 +111,13 @@ TileInspection SceneLoader::InspectTile(int tileX, int tileY) const
     {
         if (qi.tileX == tileX && qi.tileY == tileY)
             info.questItems.push_back(&qi);
+    }
+
+    // Lights
+    for (const auto& light : m_scene.lights)
+    {
+        if (light.tileX == tileX && light.tileY == tileY)
+            info.lights.push_back(&light);
     }
 
     // Triggers
@@ -332,12 +339,21 @@ void SceneLoader::BuildOccluders(engine::OccluderSet& occluders, const engine::G
     }
 }
 
-void SceneLoader::BuildLights(engine::LightSystem& lights) const
+void SceneLoader::BuildLights(engine::LightSystem& lights, const engine::Grid& grid) const
 {
     lights.Clear();
     for (const auto& sl : m_scene.lights)
     {
-        lights.AddLight(sl.worldX, sl.worldY,
+        float lightX = sl.worldX;
+        float lightY = sl.worldY;
+        if (m_scene.InBounds(sl.tileX, sl.tileY))
+        {
+            const auto center = grid.TileToWorld(sl.tileX, sl.tileY);
+            lightX = center.x;
+            lightY = center.y;
+        }
+
+        lights.AddLight(lightX, lightY,
                          sl.r, sl.g, sl.b,
                          sl.radius, sl.intensity, sl.flickerPhase);
     }

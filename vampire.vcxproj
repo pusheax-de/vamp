@@ -241,7 +241,7 @@
   </ItemGroup>
   <ItemDefinitionGroup>
     <PostBuildEvent>
-      <Command>powershell -ExecutionPolicy Bypass -File "$(ProjectDir)copy_assets.ps1" -ProjectDir "$(ProjectDir)." -OutDir "$(OutDir)."</Command>
+      <Command>cd /d "$(ProjectDir)" &amp;&amp; powershell -ExecutionPolicy Bypass -File "$(ProjectDir)copyAssets.ps1"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

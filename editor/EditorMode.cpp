@@ -28,20 +28,38 @@ static void EditorSubmitObjects(EditorState& editor,
                                 const engine::Grid& grid,
                                 engine::RenderQueue& renderQueue,
                                 engine::RendererD3D12& renderer);
+static void EnsureLightMarkerTexture(EditorState& editor,
+                                     engine::RendererD3D12& renderer);
+static void EditorSubmitLightMarkers(EditorState& editor,
+                                     const vamp::SceneData& scene,
+                                     const engine::Grid& grid,
+                                     engine::RenderQueue& renderQueue,
+                                     engine::RendererD3D12& renderer);
 static std::string SceneObjectDisplayName(const EditorState& editor, const vamp::SceneObject& obj);
+static const char* SceneLightDisplayName(const vamp::SceneLight& light);
 static const char* SceneObjectPlacementName(vamp::SceneObjectPlacement placement);
 static bool PlaceSelectedObject(vamp::SceneData& scene,
                                 EditorState& editor,
                                 const EditorObjectAsset& asset,
                                 const char* sourceLabel);
+static bool PlaceSelectedLight(vamp::SceneData& scene,
+                               EditorState& editor,
+                               const engine::Grid& grid,
+                               const char* sourceLabel);
 static int FindTopmostObjectAtTile(const vamp::SceneData& scene, int tx, int ty);
 static void RefreshContextMenuItems(EditorState& editor, const vamp::SceneData& scene);
 static bool GetPrimarySelectedTile(const EditorState& editor, int& tx, int& ty);
 static std::vector<int> GetGroundItemIndicesAtTile(const vamp::SceneData& scene, int tx, int ty);
+static std::vector<int> GetLightIndicesAtTile(const vamp::SceneData& scene, int tx, int ty);
 struct TilePlacedEntry
 {
-    bool isGroundItem = false;
-    int  index = -1;
+    enum class Kind
+    {
+        GroundItem,
+        Object,
+        Light,
+    } kind = Kind::GroundItem;
+    int index = -1;
 };
 static std::vector<TilePlacedEntry> GetPlacedEntriesAtTile(const vamp::SceneData& scene, int tx, int ty);
 static void SyncFocusedTileSelection(const vamp::SceneData& scene, EditorState& editor);
@@ -70,6 +88,9 @@ static void ApplyTerrainFromDropdown(uint64_t terrainId,
                                      engine::OccluderSet& occluders,
                                      const engine::Grid& grid);
 static void DiscoverEditorAssets(EditorState& editor);
+static void RebuildEditorLights(const vamp::SceneData& scene,
+                                engine::LightSystem& lights,
+                                const engine::Grid& grid);
 
 // ---------------------------------------------------------------------------
 // Helpers: build a MapTile from terrain type with sensible defaults
@@ -133,9 +154,13 @@ static const uint64_t kActionRootPlaceItem        = 0xFFFFFFFFFFFFFFE1ull;
 static const uint64_t kActionRootPlaceObject      = 0xFFFFFFFFFFFFFFE2ull;
 static const uint64_t kActionRootSelectedItem     = 0xFFFFFFFFFFFFFFE3ull;
 static const uint64_t kActionRootSelectedObject   = 0xFFFFFFFFFFFFFFE4ull;
+static const uint64_t kActionRootSelectedLight    = 0xFFFFFFFFFFFFFFE5ull;
 static const uint64_t kActionDeleteFirst          = 0xFFFFFFFFFFFFFFD0ull;
 static const uint64_t kActionCopySelectedItem     = 0xFFFFFFFFFFFFFFD1ull;
 static const uint64_t kActionDeleteSelectedItem   = 0xFFFFFFFFFFFFFFD2ull;
+static const uint64_t kActionPlaceLight           = 0xFFFFFFFFFFFFFFD3ull;
+static const uint64_t kActionCopySelectedLight    = 0xFFFFFFFFFFFFFFD4ull;
+static const uint64_t kActionDeleteSelectedLight  = 0xFFFFFFFFFFFFFFD5ull;
 static const uint64_t kActionPlacementYMin        = 0xFFFFFFFFFFFFFFC0ull;
 static const uint64_t kActionPlacementYMiddle     = 0xFFFFFFFFFFFFFFC1ull;
 static const uint64_t kActionPlacementYMax        = 0xFFFFFFFFFFFFFFC2ull;
@@ -229,6 +254,11 @@ static std::string SceneObjectDisplayName(const EditorState& editor, const vamp:
     std::ostringstream ss;
     ss << "object_" << obj.typeId;
     return ss.str();
+}
+
+static const char* SceneLightDisplayName(const vamp::SceneLight& light)
+{
+    return light.tag[0] != '\0' ? light.tag : "Light";
 }
 
 static const char* SceneObjectPlacementName(vamp::SceneObjectPlacement placement)
@@ -387,6 +417,44 @@ static bool PlaceSelectedObject(vamp::SceneData& scene,
     return true;
 }
 
+static bool PlaceSelectedLight(vamp::SceneData& scene,
+                               EditorState& editor,
+                               const engine::Grid& grid,
+                               const char* sourceLabel)
+{
+    if (editor.selectedTiles.empty())
+        return false;
+
+    int placed = 0;
+    for (const auto& tc : editor.selectedTiles)
+    {
+        vamp::SceneLight light;
+        light.tileX = tc.x;
+        light.tileY = tc.y;
+        const auto center = grid.TileToWorld(tc.x, tc.y);
+        light.worldX = center.x;
+        light.worldY = center.y;
+        light.r = 1.0f;
+        light.g = 0.9f;
+        light.b = 0.5f;
+        light.radius = 140.0f;
+        light.intensity = 1.0f;
+        light.flickerPhase = 0.0f;
+        std::memset(light.tag, 0, sizeof(light.tag));
+        scene.lights.push_back(light);
+        ++placed;
+    }
+
+    editor.dirty = true;
+    std::ostringstream ss;
+    ss << "[Editor] Placed light on " << placed << " tile(s)";
+    if (sourceLabel && sourceLabel[0])
+        ss << " " << sourceLabel;
+    ss << "\n";
+    OutputDebugStringA(ss.str().c_str());
+    return true;
+}
+
 static int FindTopmostObjectAtTile(const vamp::SceneData& scene, int tx, int ty)
 {
     for (int i = static_cast<int>(scene.objects.size()) - 1; i >= 0; --i)
@@ -422,13 +490,24 @@ static std::vector<int> GetGroundItemIndicesAtTile(const vamp::SceneData& scene,
     return indices;
 }
 
+static std::vector<int> GetLightIndicesAtTile(const vamp::SceneData& scene, int tx, int ty)
+{
+    std::vector<int> indices;
+    for (int i = 0; i < static_cast<int>(scene.lights.size()); ++i)
+    {
+        if (scene.lights[i].tileX == tx && scene.lights[i].tileY == ty)
+            indices.push_back(i);
+    }
+    return indices;
+}
+
 static std::vector<TilePlacedEntry> GetPlacedEntriesAtTile(const vamp::SceneData& scene, int tx, int ty)
 {
     std::vector<TilePlacedEntry> entries;
     for (int i = 0; i < static_cast<int>(scene.groundItems.size()); ++i)
     {
         if (scene.groundItems[i].tileX == tx && scene.groundItems[i].tileY == ty)
-            entries.push_back({ true, i });
+            entries.push_back({ TilePlacedEntry::Kind::GroundItem, i });
     }
 
     for (int i = 0; i < static_cast<int>(scene.objects.size()); ++i)
@@ -437,8 +516,14 @@ static std::vector<TilePlacedEntry> GetPlacedEntriesAtTile(const vamp::SceneData
         if (tx >= obj.x0 && tx <= obj.x1 &&
             ty >= obj.y0 && ty <= obj.y1)
         {
-            entries.push_back({ false, i });
+            entries.push_back({ TilePlacedEntry::Kind::Object, i });
         }
+    }
+
+    for (int i = 0; i < static_cast<int>(scene.lights.size()); ++i)
+    {
+        if (scene.lights[i].tileX == tx && scene.lights[i].tileY == ty)
+            entries.push_back({ TilePlacedEntry::Kind::Light, i });
     }
 
     return entries;
@@ -454,6 +539,7 @@ static const char* ContextMenuPageTitle(EditorContextMenuPage page)
     case EditorContextMenuPage::PlaceObject:    return "Place Object";
     case EditorContextMenuPage::SelectedItem:   return "Selected Item";
     case EditorContextMenuPage::SelectedObject: return "Selected Object";
+    case EditorContextMenuPage::SelectedLight:  return "Selected Light";
     default:                                    return "Tile Actions";
     }
 }
@@ -659,6 +745,7 @@ static void SyncFocusedTileSelection(const vamp::SceneData& scene, EditorState& 
         editor.selectedPlacedOrdinal = -1;
         editor.selectedGroundItemOrdinal = -1;
         editor.selectedObjectIndex = -1;
+        editor.selectedLightIndex = -1;
         return;
     }
 
@@ -668,6 +755,7 @@ static void SyncFocusedTileSelection(const vamp::SceneData& scene, EditorState& 
         editor.selectedPlacedOrdinal = -1;
         editor.selectedGroundItemOrdinal = -1;
         editor.selectedObjectIndex = -1;
+        editor.selectedLightIndex = -1;
     }
     else
     {
@@ -675,23 +763,30 @@ static void SyncFocusedTileSelection(const vamp::SceneData& scene, EditorState& 
             editor.selectedPlacedOrdinal = 0;
         editor.selectedPlacedOrdinal %= static_cast<int>(entries.size());
 
-        int groundOrdinal = -1;
-        for (int i = 0; i <= editor.selectedPlacedOrdinal; ++i)
-        {
-            if (entries[i].isGroundItem)
-                ++groundOrdinal;
-        }
-
         const TilePlacedEntry& selected = entries[editor.selectedPlacedOrdinal];
-        if (selected.isGroundItem)
+        if (selected.kind == TilePlacedEntry::Kind::GroundItem)
         {
+            int groundOrdinal = -1;
+            for (int i = 0; i <= editor.selectedPlacedOrdinal; ++i)
+            {
+                if (entries[i].kind == TilePlacedEntry::Kind::GroundItem)
+                    ++groundOrdinal;
+            }
             editor.selectedGroundItemOrdinal = groundOrdinal;
             editor.selectedObjectIndex = -1;
+            editor.selectedLightIndex = -1;
+        }
+        else if (selected.kind == TilePlacedEntry::Kind::Light)
+        {
+            editor.selectedGroundItemOrdinal = -1;
+            editor.selectedObjectIndex = -1;
+            editor.selectedLightIndex = selected.index;
         }
         else
         {
             editor.selectedGroundItemOrdinal = -1;
             editor.selectedObjectIndex = selected.index;
+            editor.selectedLightIndex = -1;
         }
     }
 }
@@ -732,12 +827,16 @@ static std::string BuildSelectedPlacedLabel(const vamp::SceneData& scene,
     const TilePlacedEntry& selected = entries[ordinal];
     std::ostringstream ss;
     ss << "Selected " << (ordinal + 1) << "/" << entries.size() << ": ";
-    if (selected.isGroundItem)
+    if (selected.kind == TilePlacedEntry::Kind::GroundItem)
     {
         const vamp::SceneGroundItem& gi = scene.groundItems[selected.index];
         ss << GroundItemName(gi);
         if (gi.quantity > 1)
             ss << " x" << gi.quantity;
+    }
+    else if (selected.kind == TilePlacedEntry::Kind::Light)
+    {
+        ss << SceneLightDisplayName(scene.lights[selected.index]);
     }
     else
     {
@@ -760,6 +859,9 @@ static void RefreshContextMenuItems(EditorState& editor, const vamp::SceneData& 
     std::vector<int> groundItems = hasPrimaryTile
         ? GetGroundItemIndicesAtTile(scene, primaryX, primaryY)
         : std::vector<int>();
+    std::vector<int> lightsAtTile = hasPrimaryTile
+        ? GetLightIndicesAtTile(scene, primaryX, primaryY)
+        : std::vector<int>();
 
     switch (editor.contextMenuPage)
     {
@@ -773,6 +875,9 @@ static void RefreshContextMenuItems(EditorState& editor, const vamp::SceneData& 
         if (editor.selectedObjectIndex >= 0 &&
             editor.selectedObjectIndex < static_cast<int>(scene.objects.size()))
             itemItems.push_back({ kActionRootSelectedObject, ContextMenuActionLabel(editor, kActionRootSelectedObject, "Selected Object >") });
+        if (editor.selectedLightIndex >= 0 &&
+            editor.selectedLightIndex < static_cast<int>(scene.lights.size()))
+            itemItems.push_back({ kActionRootSelectedLight, ContextMenuActionLabel(editor, kActionRootSelectedLight, "Selected Light >") });
         itemItems.push_back({ kActionDeleteFirst, ContextMenuActionLabel(editor, kActionDeleteFirst, "[Delete First Item/Object At Tile]") });
         break;
 
@@ -797,6 +902,7 @@ static void RefreshContextMenuItems(EditorState& editor, const vamp::SceneData& 
 
     case EditorContextMenuPage::PlaceObject:
         itemItems.push_back({ kActionBack, "< Back" });
+        itemItems.push_back({ kActionPlaceLight, ContextMenuActionLabel(editor, kActionPlaceLight, "Light") });
         for (size_t i = 0; i < editor.objectAssets.size(); ++i)
         {
             const EditorObjectAsset& asset = editor.objectAssets[i];
@@ -824,6 +930,17 @@ static void RefreshContextMenuItems(EditorState& editor, const vamp::SceneData& 
             itemItems.push_back({ kActionPlacementYMiddle, ContextMenuActionLabel(editor, kActionPlacementYMiddle, "Placement: Y Middle") });
             itemItems.push_back({ kActionPlacementYMax, ContextMenuActionLabel(editor, kActionPlacementYMax, "Placement: Y Max") });
             itemItems.push_back({ kActionDeleteSelectedObject, ContextMenuActionLabel(editor, kActionDeleteSelectedObject, "[Delete Selected Object]") });
+        }
+        break;
+
+    case EditorContextMenuPage::SelectedLight:
+        itemItems.push_back({ kActionBack, "< Back" });
+        if (editor.selectedLightIndex >= 0 &&
+            editor.selectedLightIndex < static_cast<int>(scene.lights.size()) &&
+            !lightsAtTile.empty())
+        {
+            itemItems.push_back({ kActionCopySelectedLight, ContextMenuActionLabel(editor, kActionCopySelectedLight, "Place On Selection") });
+            itemItems.push_back({ kActionDeleteSelectedLight, ContextMenuActionLabel(editor, kActionDeleteSelectedLight, "[Delete Selected Light]") });
         }
         break;
     }
@@ -856,6 +973,27 @@ static void RebuildOccluders(vamp::SceneLoader& sceneLoader,
                                     static_cast<int>(w), static_cast<int>(h),
                                     scene.header.tileSize,
                                     scene.header.originX, scene.header.originY);
+}
+
+static void RebuildEditorLights(const vamp::SceneData& scene,
+                                engine::LightSystem& lights,
+                                const engine::Grid& grid)
+{
+    lights.Clear();
+    for (const auto& light : scene.lights)
+    {
+        float lightX = light.worldX;
+        float lightY = light.worldY;
+        if (scene.InBounds(light.tileX, light.tileY))
+        {
+            const auto center = grid.TileToWorld(light.tileX, light.tileY);
+            lightX = center.x;
+            lightY = center.y;
+        }
+
+        lights.AddLight(lightX, lightY, light.r, light.g, light.b,
+            light.radius, light.intensity, light.flickerPhase);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -928,7 +1066,8 @@ static bool HandleTerrainHotkey(const engine::InputSystem& input,
 // ---------------------------------------------------------------------------
 static bool HandleItemHotkey(const engine::InputSystem& input,
                              vamp::SceneData& scene,
-                             EditorState& editor)
+                             EditorState& editor,
+                             const engine::Grid& grid)
 {
     SyncFocusedTileSelection(scene, editor);
 
@@ -962,6 +1101,33 @@ static bool HandleItemHotkey(const engine::InputSystem& input,
                 }
                 return true;
             }
+
+            if (editor.selectedLightIndex >= 0 &&
+                editor.selectedLightIndex < static_cast<int>(scene.lights.size()))
+            {
+                const vamp::SceneLight source = scene.lights[editor.selectedLightIndex];
+                int placed = 0;
+                for (const auto& tc : editor.selectedTiles)
+                {
+                    vamp::SceneLight light = source;
+                    light.tileX = tc.x;
+                    light.tileY = tc.y;
+                    const auto center = grid.TileToWorld(tc.x, tc.y);
+                    light.worldX = center.x;
+                    light.worldY = center.y;
+                    scene.lights.push_back(light);
+                    ++placed;
+                }
+
+                if (placed > 0)
+                {
+                    editor.dirty = true;
+                    std::ostringstream ss;
+                    ss << "[Editor] Copied selected light to " << placed << " tile(s)\n";
+                    OutputDebugStringA(ss.str().c_str());
+                }
+                return true;
+            }
         }
     }
 
@@ -989,6 +1155,12 @@ static bool HandleItemHotkey(const engine::InputSystem& input,
             editor.selectedObjectIndex = -1;
             ++deleted;
         }
+        else if (editor.selectedLightIndex >= 0)
+        {
+            scene.lights.erase(scene.lights.begin() + editor.selectedLightIndex);
+            editor.selectedLightIndex = -1;
+            ++deleted;
+        }
 
         if (deleted > 0)
         {
@@ -1014,6 +1186,11 @@ static bool HandleItemHotkey(const engine::InputSystem& input,
         editor.objectAssets.size() > 1)
     {
         PlaceSelectedObject(scene, editor, editor.objectAssets[1], "");
+        return true;
+    }
+    if (input.IsKeyPressed('3') && !editor.selectedTiles.empty())
+    {
+        PlaceSelectedLight(scene, editor, grid, "");
         return true;
     }
 
@@ -1174,6 +1351,22 @@ static void EditorUpdateOverlay(EditorState& editor,
                 ss << " | Object: " << SceneObjectDisplayName(editor, obj)
                    << " (" << SceneObjectPlacementName(obj.placement) << ")";
             }
+
+            std::vector<int> tileLights = GetLightIndicesAtTile(*scene, tx, ty);
+            if (!tileLights.empty())
+            {
+                if (editor.selectedLightIndex >= 0 &&
+                    editor.selectedLightIndex < static_cast<int>(scene->lights.size()) &&
+                    scene->lights[editor.selectedLightIndex].tileX == tx &&
+                    scene->lights[editor.selectedLightIndex].tileY == ty)
+                {
+                    ss << " | Light: " << SceneLightDisplayName(scene->lights[editor.selectedLightIndex]);
+                }
+                else
+                {
+                    ss << " | Lights: " << tileLights.size();
+                }
+            }
         }
         if (editor.uiTileInfoLabel)
             editor.uiTileInfoLabel->SetText(ss.str());
@@ -1183,7 +1376,7 @@ static void EditorUpdateOverlay(EditorState& editor,
     {
         std::ostringstream ss;
         ss << "LMB=Select Tile  Shift+LMB=Add  RMB=Context Menu  Wheel=Cycle Tile Items  "
-           << "P=Copy Selected Item  1/2=First Objects  B/S/A/F/V=Consumables  "
+           << "P=Copy Selected Item  1/2=First Objects  3=Light  B/S/A/F/V=Consumables  "
            << "F/T/R/W/L/D/M/H=Ground  Del=Delete Selected  Ctrl+S=Save  Esc=Cancel";
         if (editor.uiHintsLabel)
             editor.uiHintsLabel->SetText(ss.str());
@@ -1388,6 +1581,7 @@ static void ApplyItemFromDropdown(uint64_t itemId,
     if (itemId == kActionRootPlaceObject) { editor.contextMenuPage = EditorContextMenuPage::PlaceObject; return; }
     if (itemId == kActionRootSelectedItem) { editor.contextMenuPage = EditorContextMenuPage::SelectedItem; return; }
     if (itemId == kActionRootSelectedObject) { editor.contextMenuPage = EditorContextMenuPage::SelectedObject; return; }
+    if (itemId == kActionRootSelectedLight) { editor.contextMenuPage = EditorContextMenuPage::SelectedLight; return; }
 
     if (editor.terrainAssetIndexByActionId.find(itemId) != editor.terrainAssetIndexByActionId.end())
     {
@@ -1449,6 +1643,53 @@ static void ApplyItemFromDropdown(uint64_t itemId,
         }
         SyncFocusedTileSelection(scene, editor);
         editor.contextMenuPage = EditorContextMenuPage::SelectedItem;
+        return;
+    }
+
+    if (itemId == kActionCopySelectedLight)
+    {
+        if (editor.selectedLightIndex >= 0 &&
+            editor.selectedLightIndex < static_cast<int>(scene.lights.size()))
+        {
+            const vamp::SceneLight source = scene.lights[editor.selectedLightIndex];
+            int placed = 0;
+            for (const auto& tc : editor.selectedTiles)
+            {
+                vamp::SceneLight light = source;
+                light.tileX = tc.x;
+                light.tileY = tc.y;
+                const auto center = grid.TileToWorld(tc.x, tc.y);
+                light.worldX = center.x;
+                light.worldY = center.y;
+                scene.lights.push_back(light);
+                ++placed;
+            }
+
+            if (placed > 0)
+            {
+                editor.dirty = true;
+                std::ostringstream ss;
+                ss << "[Editor] Copied selected light to " << placed << " tile(s) (context)\n";
+                OutputDebugStringA(ss.str().c_str());
+            }
+        }
+        SyncFocusedTileSelection(scene, editor);
+        editor.contextMenuPage = EditorContextMenuPage::SelectedLight;
+        return;
+    }
+
+    if (itemId == kActionDeleteSelectedLight)
+    {
+        if (editor.selectedLightIndex >= 0 &&
+            editor.selectedLightIndex < static_cast<int>(scene.lights.size()))
+        {
+            scene.lights.erase(scene.lights.begin() + editor.selectedLightIndex);
+            editor.selectedLightIndex = -1;
+            editor.dirty = true;
+            OutputDebugStringA("[Editor] Deleted selected light (context)\n");
+        }
+        SyncFocusedTileSelection(scene, editor);
+        editor.contextMenuPage = EditorContextMenuPage::SelectedLight;
         return;
     }
 
@@ -1515,6 +1756,17 @@ static void ApplyItemFromDropdown(uint64_t itemId,
                 objs.erase(oit);
                 ++deleted;
             }
+
+            auto& tileLights = scene.lights;
+            auto lit = std::find_if(tileLights.begin(), tileLights.end(),
+                [&tc](const vamp::SceneLight& light) {
+                    return light.tileX == tc.x && light.tileY == tc.y;
+                });
+            if (lit != tileLights.end())
+            {
+                tileLights.erase(lit);
+                ++deleted;
+            }
         }
 
         if (deleted > 0)
@@ -1531,6 +1783,13 @@ static void ApplyItemFromDropdown(uint64_t itemId,
 
     if (!editor.selectedTiles.empty())
     {
+        if (itemId == kActionPlaceLight)
+        {
+            PlaceSelectedLight(scene, editor, grid, "(dropdown)");
+            editor.contextMenuPage = EditorContextMenuPage::Root;
+            return;
+        }
+
         std::unordered_map<uint64_t, size_t>::const_iterator objectIt =
             editor.objectAssetIndexByTypeId.find(itemId);
         if (objectIt != editor.objectAssetIndexByTypeId.end())
@@ -1846,7 +2105,7 @@ void EditorFrame(engine::RendererD3D12& renderer,
         {
             HandleTerrainHotkey(input, sceneLoader.GetSceneData(), editor,
                 sceneLoader, occluders, grid);
-            HandleItemHotkey(input, sceneLoader.GetSceneData(), editor);
+            HandleItemHotkey(input, sceneLoader.GetSceneData(), editor, grid);
         }
     }
 
@@ -1858,6 +2117,9 @@ void EditorFrame(engine::RendererD3D12& renderer,
     EditorUpdateOverlay(editor, input, grid, scenePtr);
 
     // --- Render ---
+    if (sceneLoader.IsLoaded())
+        RebuildEditorLights(sceneLoader.GetSceneData(), lights, grid);
+
     lights.Update(time);
     renderer.BeginFrame();
 
@@ -1868,6 +2130,7 @@ void EditorFrame(engine::RendererD3D12& renderer,
     {
         EditorSubmitGroundTiles(editor, sceneLoader.GetSceneData(), grid, renderQueue, renderer);
         EditorSubmitObjects(editor, sceneLoader.GetSceneData(), grid, renderQueue, renderer);
+        EditorSubmitLightMarkers(editor, sceneLoader.GetSceneData(), grid, renderQueue, renderer);
     }
 
     // Fog: fully visible in editor (no gameplay fog)
@@ -2174,5 +2437,81 @@ static void EditorSubmitObjects(EditorState& editor,
         // resolve to the same Y-sort value.
         renderQueue.Submit(engine::RenderLayer::WallsProps, inst.sortY, 50,
                            static_cast<uint16_t>(objIndex & 0xFFFF), inst);
+    }
+}
+
+static void EnsureLightMarkerTexture(EditorState& editor,
+    engine::RendererD3D12& renderer)
+{
+    if (editor.lightMarkerTextureLoaded)
+        return;
+
+    const uint32_t kSize = 16;
+    std::vector<uint8_t> pixels(kSize * kSize * 4, 0);
+    const float center = 7.5f;
+    for (uint32_t y = 0; y < kSize; ++y)
+    {
+        for (uint32_t x = 0; x < kSize; ++x)
+        {
+            const float dx = static_cast<float>(x) - center;
+            const float dy = static_cast<float>(y) - center;
+            const float dist2 = dx * dx + dy * dy;
+            const size_t idx = (y * kSize + x) * 4;
+
+            if (dist2 <= 49.0f)
+            {
+                pixels[idx + 0] = 255;
+                pixels[idx + 1] = 220;
+                pixels[idx + 2] = 96;
+                pixels[idx + 3] = 220;
+            }
+            if (dist2 <= 16.0f)
+            {
+                pixels[idx + 0] = 255;
+                pixels[idx + 1] = 250;
+                pixels[idx + 2] = 180;
+                pixels[idx + 3] = 255;
+            }
+        }
+    }
+
+    if (editor.lightMarkerTexture.CreateFromRGBA(
+            renderer.GetDevice(), renderer.GetCommandList(),
+            renderer.GetUploadManager(), renderer.GetSRVHeap(),
+            kSize, kSize, pixels.data()))
+    {
+        editor.lightMarkerTextureLoaded = true;
+    }
+}
+
+static void EditorSubmitLightMarkers(EditorState& editor,
+    const vamp::SceneData& scene,
+    const engine::Grid& grid,
+    engine::RenderQueue& renderQueue,
+    engine::RendererD3D12& renderer)
+{
+    EnsureLightMarkerTexture(editor, renderer);
+    if (!editor.lightMarkerTextureLoaded || !editor.lightMarkerTexture.IsValid())
+        return;
+
+    for (size_t lightIndex = 0; lightIndex < scene.lights.size(); ++lightIndex)
+    {
+        const vamp::SceneLight& light = scene.lights[lightIndex];
+        if (!scene.InBounds(light.tileX, light.tileY))
+            continue;
+
+        const auto center = grid.TileToWorld(light.tileX, light.tileY);
+        engine::SpriteInstance inst;
+        inst.position = { center.x, center.y - 6.0f };
+        inst.size = { 12.0f, 12.0f };
+        inst.uvRect = { 0.0f, 0.0f, 1.0f, 1.0f };
+        inst.color = { 1.0f, 1.0f, 1.0f, 0.95f };
+        inst.rotation = 0.0f;
+        inst.sortY = center.y - 6.0f;
+        inst.textureIndex = editor.lightMarkerTexture.GetSRVIndex();
+        inst.depthZ = 0.5f;
+
+        renderQueue.Submit(engine::RenderLayer::WallsProps, inst.sortY, 75,
+            static_cast<uint16_t>(lightIndex & 0xFFFF), inst);
     }
 }

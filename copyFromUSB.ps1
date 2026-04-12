@@ -1,9 +1,6 @@
 param(
     [Parameter(Mandatory = $true)]
-    [string]$InDir,
-
-    [Parameter(Mandatory = $true)]
-    [string]$OutDir
+    [string]$UsbDir
 )
 
 $ErrorActionPreference = "Stop"
@@ -29,14 +26,18 @@ if ($null -eq $sevenZipCommand) {
     throw "7z.exe was not found in PATH."
 }
 
-$sourceRoot = [System.IO.Path]::GetFullPath($InDir)
-$destinationRoot = [System.IO.Path]::GetFullPath($OutDir)
+$sourceRoot = [System.IO.Path]::GetFullPath($UsbDir)
+$destinationRoot = [System.IO.Path]::GetFullPath((Get-Location).Path)
+$solutionPath = Join-Path $destinationRoot "vampire.sln"
 
 if (-not (Test-Path -LiteralPath $sourceRoot)) {
     throw "Input directory does not exist: $sourceRoot"
 }
 
-New-Item -ItemType Directory -Force -Path $destinationRoot | Out-Null
+if (-not (Test-Path -LiteralPath $solutionPath)) {
+    Write-Error "Current directory does not look like the vampire project root: missing vampire.sln"
+    exit 1
+}
 
 $archive = Get-ChildItem -LiteralPath $sourceRoot -Filter "vampire_sources_*.7z" -File |
     Sort-Object LastWriteTimeUtc, Name |

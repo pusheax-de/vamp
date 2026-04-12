@@ -487,6 +487,8 @@ bool GenerateTestScene(const std::string& filePath)
     // Flickering torch at L-corridor entrance
     {
         SceneLight light;
+        light.tileX = 6;
+        light.tileY = 8;
         tileWorld(6, 8, light.worldX, light.worldY);
         light.r = 1.0f; light.g = 0.7f; light.b = 0.3f;
         light.radius    = 160.0f;
@@ -499,6 +501,8 @@ bool GenerateTestScene(const std::string& filePath)
     // Cool light inside the enclosed room
     {
         SceneLight light;
+        light.tileX = 22;
+        light.tileY = 15;
         tileWorld(22, 15, light.worldX, light.worldY);
         light.r = 0.4f; light.g = 0.5f; light.b = 1.0f;
         light.radius    = 120.0f;
@@ -511,6 +515,8 @@ bool GenerateTestScene(const std::string& filePath)
     // Street light near center
     {
         SceneLight light;
+        light.tileX = 15;
+        light.tileY = 15;
         tileWorld(15, 15, light.worldX, light.worldY);
         light.r = 1.0f; light.g = 0.95f; light.b = 0.8f;
         light.radius    = 250.0f;
@@ -523,6 +529,8 @@ bool GenerateTestScene(const std::string& filePath)
     // Dim red light near T-junction
     {
         SceneLight light;
+        light.tileX = 15;
+        light.tileY = 22;
         tileWorld(15, 22, light.worldX, light.worldY);
         light.r = 1.0f; light.g = 0.2f; light.b = 0.2f;
         light.radius    = 130.0f;
@@ -535,6 +543,8 @@ bool GenerateTestScene(const std::string& filePath)
     // Torch near safehouse
     {
         SceneLight light;
+        light.tileX = 3;
+        light.tileY = 28;
         tileWorld(3, 28, light.worldX, light.worldY);
         light.r = 1.0f; light.g = 0.6f; light.b = 0.2f;
         light.radius    = 100.0f;
@@ -547,6 +557,8 @@ bool GenerateTestScene(const std::string& filePath)
     // Light near east exit
     {
         SceneLight light;
+        light.tileX = 29;
+        light.tileY = 15;
         tileWorld(29, 15, light.worldX, light.worldY);
         light.r = 0.8f; light.g = 0.9f; light.b = 1.0f;
         light.radius    = 140.0f;

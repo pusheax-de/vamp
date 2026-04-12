@@ -33,6 +33,7 @@ enum class EditorContextMenuPage
     PlaceObject,
     SelectedItem,
     SelectedObject,
+    SelectedLight,
 };
 
 // ---------------------------------------------------------------------------
@@ -84,6 +85,7 @@ struct EditorState
     int                     selectedPlacedOrdinal = -1; // Combined placed-content selection for the primary tile
     int                     selectedObjectIndex = -1;   // Scene object targeted by item selection
     int                     selectedGroundItemOrdinal = -1;
+    int                     selectedLightIndex = -1;
     EditorContextMenuPage   contextMenuPage = EditorContextMenuPage::Root;
     float                   contextMenuX = 0.0f;
     float                   contextMenuY = 0.0f;
@@ -113,6 +115,8 @@ struct EditorState
 
     // Object textures (loaded on demand, keyed by image path)
     std::vector<EditorObjectTextureCacheEntry> objectTextureCache;
+    engine::Texture2D      lightMarkerTexture;
+    bool                   lightMarkerTextureLoaded = false;
 
     void ShutdownTextures(engine::PersistentDescriptorAllocator& srvHeap)
     {
@@ -134,6 +138,12 @@ struct EditorState
             }
         }
         objectTextureCache.clear();
+
+        if (lightMarkerTextureLoaded)
+        {
+            lightMarkerTexture.Shutdown(srvHeap);
+            lightMarkerTextureLoaded = false;
+        }
     }
 
     void ClearSelection()
@@ -143,6 +153,7 @@ struct EditorState
         selectedPlacedOrdinal = -1;
         selectedObjectIndex = -1;
         selectedGroundItemOrdinal = -1;
+        selectedLightIndex = -1;
     }
 
     bool HasTile(int tx, int ty) const

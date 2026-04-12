@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)]
-    [string]$OutDir
+    [string]$UsbDir
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,12 +26,13 @@ if ($null -eq $sevenZipCommand) {
     throw "7z.exe was not found in PATH."
 }
 
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$projectRoot = [System.IO.Path]::GetFullPath($scriptDir)
-$destinationRoot = [System.IO.Path]::GetFullPath($OutDir)
+$projectRoot = [System.IO.Path]::GetFullPath((Get-Location).Path)
+$destinationRoot = [System.IO.Path]::GetFullPath($UsbDir)
+$solutionPath = Join-Path $projectRoot "vampire.sln"
 
-if (-not (Test-Path -LiteralPath $projectRoot)) {
-    throw "Project root does not exist: $projectRoot"
+if (-not (Test-Path -LiteralPath $solutionPath)) {
+    Write-Error "Current directory does not look like the vampire project root: missing vampire.sln"
+    exit 1
 }
 
 New-Item -ItemType Directory -Force -Path $destinationRoot | Out-Null
@@ -56,7 +57,7 @@ $includeEntries = @(
     "vampire.rc",
     "framework.h",
     "copy_assets.ps1",
-    "copyToUSB.ps1"
+    "copyToUSB.ps1",
     "copyFromUSB.ps1"
 )
 
