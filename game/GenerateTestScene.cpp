@@ -493,6 +493,7 @@ bool GenerateTestScene(const std::string& filePath)
         light.r = 1.0f; light.g = 0.7f; light.b = 0.3f;
         light.radius    = 160.0f;
         light.intensity = 1.0f;
+        light.intensityLevel = 3;
         light.flickerPhase = 0.0f;
         SetFixedStr(light.tag, sizeof(light.tag), "torch_lcorr");
         scene.lights.push_back(light);
@@ -507,6 +508,7 @@ bool GenerateTestScene(const std::string& filePath)
         light.r = 0.4f; light.g = 0.5f; light.b = 1.0f;
         light.radius    = 120.0f;
         light.intensity = 0.8f;
+        light.intensityLevel = 2;
         light.flickerPhase = 0.3f;
         SetFixedStr(light.tag, sizeof(light.tag), "light_room");
         scene.lights.push_back(light);
@@ -521,6 +523,7 @@ bool GenerateTestScene(const std::string& filePath)
         light.r = 1.0f; light.g = 0.95f; light.b = 0.8f;
         light.radius    = 250.0f;
         light.intensity = 1.0f;
+        light.intensityLevel = 3;
         light.flickerPhase = 0.0f;
         SetFixedStr(light.tag, sizeof(light.tag), "light_center");
         scene.lights.push_back(light);
@@ -535,6 +538,7 @@ bool GenerateTestScene(const std::string& filePath)
         light.r = 1.0f; light.g = 0.2f; light.b = 0.2f;
         light.radius    = 130.0f;
         light.intensity = 0.7f;
+        light.intensityLevel = 2;
         light.flickerPhase = 0.6f;
         SetFixedStr(light.tag, sizeof(light.tag), "light_tjunc");
         scene.lights.push_back(light);
@@ -549,6 +553,7 @@ bool GenerateTestScene(const std::string& filePath)
         light.r = 1.0f; light.g = 0.6f; light.b = 0.2f;
         light.radius    = 100.0f;
         light.intensity = 0.9f;
+        light.intensityLevel = 3;
         light.flickerPhase = 0.15f;
         SetFixedStr(light.tag, sizeof(light.tag), "torch_safe");
         scene.lights.push_back(light);
@@ -563,6 +568,7 @@ bool GenerateTestScene(const std::string& filePath)
         light.r = 0.8f; light.g = 0.9f; light.b = 1.0f;
         light.radius    = 140.0f;
         light.intensity = 1.0f;
+        light.intensityLevel = 3;
         light.flickerPhase = 0.0f;
         SetFixedStr(light.tag, sizeof(light.tag), "light_exit");
         scene.lights.push_back(light);

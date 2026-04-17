@@ -18,6 +18,26 @@ if (-not (Test-Path -LiteralPath $assetSource)) {
 }
 
 New-Item -ItemType Directory -Force -Path $assetTarget | Out-Null
-Copy-Item -Path (Join-Path $assetSource "*") -Destination $assetTarget -Recurse -Force
+
+$sourceRoot = [System.IO.Path]::GetFullPath($assetSource)
+$targetRoot = [System.IO.Path]::GetFullPath($assetTarget)
+
+Get-ChildItem -Path $sourceRoot -Recurse -Directory | ForEach-Object {
+    $relativePath = $_.FullName.Substring($sourceRoot.Length).TrimStart('\')
+    $destinationDir = Join-Path $targetRoot $relativePath
+    New-Item -ItemType Directory -Force -Path $destinationDir | Out-Null
+}
+
+Get-ChildItem -Path $sourceRoot -Recurse -File | ForEach-Object {
+    $relativePath = $_.FullName.Substring($sourceRoot.Length).TrimStart('\')
+    $destinationPath = Join-Path $targetRoot $relativePath
+    $destinationDir = Split-Path -Parent $destinationPath
+
+    if (-not (Test-Path -LiteralPath $destinationDir)) {
+        New-Item -ItemType Directory -Force -Path $destinationDir | Out-Null
+    }
+
+    Copy-Item -LiteralPath $_.FullName -Destination $destinationPath -Force
+}
 
 Write-Host "Copied assets to: $assetTarget"

@@ -33,7 +33,7 @@ namespace vamp
 // File header
 // ---------------------------------------------------------------------------
 static const uint32_t kSceneMagic   = 0x31504D56; // "VMP1" in little-endian
-static const uint32_t kSceneVersion = 5;
+static const uint32_t kSceneVersion = 6;
 
 struct SceneHeader
 {
@@ -145,6 +145,10 @@ struct SceneLight
     float       r = 1.0f, g = 1.0f, b = 1.0f;
     float       radius      = 100.0f;
     float       intensity   = 1.0f;
+    uint8_t     intensityLevel = 3;
+    uint8_t     reserved0   = 0;
+    uint8_t     reserved1   = 0;
+    uint8_t     reserved2   = 0;
     float       flickerPhase = 0.0f;
     char        tag[32]     = {};
 };

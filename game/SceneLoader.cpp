@@ -10,9 +10,54 @@
 #include "../engine/RoofSystem.h"
 #include "../engine/Camera2D.h"
 #include "../engine/EngineTypes.h"
+#include <cmath>
 
 namespace vamp
 {
+
+namespace
+{
+float LightIntensityFromLevel(uint8_t level)
+{
+    switch (level)
+    {
+    case 1: return 0.4f;
+    case 2: return 0.7f;
+    case 3: return 1.0f;
+    case 4: return 1.3f;
+    case 5: return 1.6f;
+    default: return 1.0f;
+    }
+}
+
+uint8_t LightLevelFromIntensity(float intensity)
+{
+    struct Mapping { uint8_t level; float value; };
+    static const Mapping mappings[] = {
+        { 1, 0.4f }, { 2, 0.7f }, { 3, 1.0f }, { 4, 1.3f }, { 5, 1.6f }
+    };
+
+    uint8_t bestLevel = 3;
+    float bestDist = 1000000.0f;
+    for (size_t i = 0; i < sizeof(mappings) / sizeof(mappings[0]); ++i)
+    {
+        const float dist = std::fabs(intensity - mappings[i].value);
+        if (dist < bestDist)
+        {
+            bestDist = dist;
+            bestLevel = mappings[i].level;
+        }
+    }
+    return bestLevel;
+}
+
+uint8_t NormalizeLightLevel(const SceneLight& light)
+{
+    if (light.intensityLevel >= 1 && light.intensityLevel <= 5)
+        return light.intensityLevel;
+    return LightLevelFromIntensity(light.intensity);
+}
+} // namespace
 
 // ===========================================================================
 // LoadScene
@@ -353,9 +398,10 @@ void SceneLoader::BuildLights(engine::LightSystem& lights, const engine::Grid& g
             lightY = center.y;
         }
 
+        const float intensity = LightIntensityFromLevel(NormalizeLightLevel(sl));
         lights.AddLight(lightX, lightY,
                          sl.r, sl.g, sl.b,
-                         sl.radius, sl.intensity, sl.flickerPhase);
+                         sl.radius, intensity, sl.flickerPhase);
     }
 }
 

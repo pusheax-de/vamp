@@ -161,6 +161,11 @@ static const uint64_t kActionDeleteSelectedItem   = 0xFFFFFFFFFFFFFFD2ull;
 static const uint64_t kActionPlaceLight           = 0xFFFFFFFFFFFFFFD3ull;
 static const uint64_t kActionCopySelectedLight    = 0xFFFFFFFFFFFFFFD4ull;
 static const uint64_t kActionDeleteSelectedLight  = 0xFFFFFFFFFFFFFFD5ull;
+static const uint64_t kActionLightIntensity1      = 0xFFFFFFFFFFFFFFB1ull;
+static const uint64_t kActionLightIntensity2      = 0xFFFFFFFFFFFFFFB2ull;
+static const uint64_t kActionLightIntensity3      = 0xFFFFFFFFFFFFFFB3ull;
+static const uint64_t kActionLightIntensity4      = 0xFFFFFFFFFFFFFFB4ull;
+static const uint64_t kActionLightIntensity5      = 0xFFFFFFFFFFFFFFB5ull;
 static const uint64_t kActionPlacementYMin        = 0xFFFFFFFFFFFFFFC0ull;
 static const uint64_t kActionPlacementYMiddle     = 0xFFFFFFFFFFFFFFC1ull;
 static const uint64_t kActionPlacementYMax        = 0xFFFFFFFFFFFFFFC2ull;
@@ -254,6 +259,47 @@ static std::string SceneObjectDisplayName(const EditorState& editor, const vamp:
     std::ostringstream ss;
     ss << "object_" << obj.typeId;
     return ss.str();
+}
+
+static float LightIntensityFromLevel(uint8_t level)
+{
+    switch (level)
+    {
+    case 1: return 0.4f;
+    case 2: return 0.7f;
+    case 3: return 1.0f;
+    case 4: return 1.3f;
+    case 5: return 1.6f;
+    default: return 1.0f;
+    }
+}
+
+static uint8_t LightLevelFromIntensity(float intensity)
+{
+    struct Mapping { uint8_t level; float value; };
+    static const Mapping mappings[] = {
+        { 1, 0.4f }, { 2, 0.7f }, { 3, 1.0f }, { 4, 1.3f }, { 5, 1.6f }
+    };
+
+    uint8_t bestLevel = 3;
+    float bestDist = 1000000.0f;
+    for (size_t i = 0; i < sizeof(mappings) / sizeof(mappings[0]); ++i)
+    {
+        const float dist = std::fabs(intensity - mappings[i].value);
+        if (dist < bestDist)
+        {
+            bestDist = dist;
+            bestLevel = mappings[i].level;
+        }
+    }
+    return bestLevel;
+}
+
+static uint8_t NormalizeLightLevel(const vamp::SceneLight& light)
+{
+    if (light.intensityLevel >= 1 && light.intensityLevel <= 5)
+        return light.intensityLevel;
+    return LightLevelFromIntensity(light.intensity);
 }
 
 static const char* SceneLightDisplayName(const vamp::SceneLight& light)
@@ -438,7 +484,8 @@ static bool PlaceSelectedLight(vamp::SceneData& scene,
         light.g = 0.9f;
         light.b = 0.5f;
         light.radius = 140.0f;
-        light.intensity = 1.0f;
+        light.intensityLevel = 3;
+        light.intensity = LightIntensityFromLevel(light.intensityLevel);
         light.flickerPhase = 0.0f;
         std::memset(light.tag, 0, sizeof(light.tag));
         scene.lights.push_back(light);
@@ -836,7 +883,8 @@ static std::string BuildSelectedPlacedLabel(const vamp::SceneData& scene,
     }
     else if (selected.kind == TilePlacedEntry::Kind::Light)
     {
-        ss << SceneLightDisplayName(scene.lights[selected.index]);
+        ss << SceneLightDisplayName(scene.lights[selected.index])
+           << " (Intensity " << static_cast<int>(NormalizeLightLevel(scene.lights[selected.index])) << ")";
     }
     else
     {
@@ -935,10 +983,15 @@ static void RefreshContextMenuItems(EditorState& editor, const vamp::SceneData& 
 
     case EditorContextMenuPage::SelectedLight:
         itemItems.push_back({ kActionBack, "< Back" });
-        if (editor.selectedLightIndex >= 0 &&
-            editor.selectedLightIndex < static_cast<int>(scene.lights.size()) &&
-            !lightsAtTile.empty())
-        {
+    if (editor.selectedLightIndex >= 0 &&
+        editor.selectedLightIndex < static_cast<int>(scene.lights.size()) &&
+        !lightsAtTile.empty())
+    {
+            itemItems.push_back({ kActionLightIntensity1, ContextMenuActionLabel(editor, kActionLightIntensity1, "Intensity: 1") });
+            itemItems.push_back({ kActionLightIntensity2, ContextMenuActionLabel(editor, kActionLightIntensity2, "Intensity: 2") });
+            itemItems.push_back({ kActionLightIntensity3, ContextMenuActionLabel(editor, kActionLightIntensity3, "Intensity: 3") });
+            itemItems.push_back({ kActionLightIntensity4, ContextMenuActionLabel(editor, kActionLightIntensity4, "Intensity: 4") });
+            itemItems.push_back({ kActionLightIntensity5, ContextMenuActionLabel(editor, kActionLightIntensity5, "Intensity: 5") });
             itemItems.push_back({ kActionCopySelectedLight, ContextMenuActionLabel(editor, kActionCopySelectedLight, "Place On Selection") });
             itemItems.push_back({ kActionDeleteSelectedLight, ContextMenuActionLabel(editor, kActionDeleteSelectedLight, "[Delete Selected Light]") });
         }
@@ -991,8 +1044,9 @@ static void RebuildEditorLights(const vamp::SceneData& scene,
             lightY = center.y;
         }
 
+        const float intensity = LightIntensityFromLevel(NormalizeLightLevel(light));
         lights.AddLight(lightX, lightY, light.r, light.g, light.b,
-            light.radius, light.intensity, light.flickerPhase);
+            light.radius, intensity, light.flickerPhase);
     }
 }
 
@@ -1678,6 +1732,33 @@ static void ApplyItemFromDropdown(uint64_t itemId,
         return;
     }
 
+    if ((itemId >= kActionLightIntensity1 && itemId <= kActionLightIntensity5) &&
+        editor.selectedLightIndex >= 0 &&
+        editor.selectedLightIndex < static_cast<int>(scene.lights.size()))
+    {
+        uint8_t level = 3;
+        switch (itemId)
+        {
+        case kActionLightIntensity1: level = 1; break;
+        case kActionLightIntensity2: level = 2; break;
+        case kActionLightIntensity3: level = 3; break;
+        case kActionLightIntensity4: level = 4; break;
+        case kActionLightIntensity5: level = 5; break;
+        default: break;
+        }
+
+        vamp::SceneLight& light = scene.lights[editor.selectedLightIndex];
+        light.intensityLevel = level;
+        light.intensity = LightIntensityFromLevel(level);
+        editor.dirty = true;
+
+        std::ostringstream ss;
+        ss << "[Editor] Light intensity -> " << static_cast<int>(level) << " (context)\n";
+        OutputDebugStringA(ss.str().c_str());
+        editor.contextMenuPage = EditorContextMenuPage::SelectedLight;
+        return;
+    }
+
     if (itemId == kActionDeleteSelectedLight)
     {
         if (editor.selectedLightIndex >= 0 &&
@@ -1999,7 +2080,8 @@ void EditorFrame(engine::RendererD3D12& renderer,
                             (s_pendingItemId == kActionRootPlaceItem) ||
                             (s_pendingItemId == kActionRootPlaceObject) ||
                             (s_pendingItemId == kActionRootSelectedItem) ||
-                            (s_pendingItemId == kActionRootSelectedObject);
+                            (s_pendingItemId == kActionRootSelectedObject) ||
+                            (s_pendingItemId == kActionRootSelectedLight);
                         ApplyItemFromDropdown(s_pendingItemId,
                             sceneLoader.GetSceneData(), editor,
                             sceneLoader, occluders, grid);

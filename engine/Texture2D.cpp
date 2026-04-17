@@ -4,6 +4,7 @@
 #include "DescriptorAllocator.h"
 #include "UploadManager.h"
 #include <cassert>
+#include <deque>
 #include <fstream>
 #include <vector>
 #include <wincodec.h>
@@ -21,7 +22,8 @@ void FixTransparentPixelBleed(std::vector<uint8_t>& pixels, uint32_t width, uint
         return;
 
     std::vector<uint8_t> fixed = pixels;
-    const int maxRadius = static_cast<int>((std::max)(width, height));
+    std::vector<uint8_t> visited(static_cast<size_t>(width) * height, 0);
+    std::deque<uint32_t> queue;
 
     for (uint32_t y = 0; y < height; ++y)
     {
@@ -29,48 +31,51 @@ void FixTransparentPixelBleed(std::vector<uint8_t>& pixels, uint32_t width, uint
         {
             const size_t idx = static_cast<size_t>(y) * width * 4 + static_cast<size_t>(x) * 4;
             if (pixels[idx + 3] != 0)
+            {
+                const size_t pixelIndex = static_cast<size_t>(y) * width + x;
+                visited[pixelIndex] = 1;
+                queue.push_back(static_cast<uint32_t>(pixelIndex));
+            }
+        }
+    }
+
+    static const int offsets[4][2] =
+    {
+        { -1, 0 },
+        { 1, 0 },
+        { 0, -1 },
+        { 0, 1 }
+    };
+
+    while (!queue.empty())
+    {
+        const uint32_t pixelIndex = queue.front();
+        queue.pop_front();
+
+        const uint32_t x = pixelIndex % width;
+        const uint32_t y = pixelIndex / width;
+        const size_t srcIdx = static_cast<size_t>(pixelIndex) * 4;
+
+        for (int i = 0; i < 4; ++i)
+        {
+            const int nx = static_cast<int>(x) + offsets[i][0];
+            const int ny = static_cast<int>(y) + offsets[i][1];
+            if (nx < 0 || ny < 0 || nx >= static_cast<int>(width) || ny >= static_cast<int>(height))
                 continue;
 
-            bool found = false;
-            for (int radius = 1; radius < maxRadius && !found; ++radius)
-            {
-                const int minX = (std::max)(0, static_cast<int>(x) - radius);
-                const int maxX = (std::min)(static_cast<int>(width) - 1, static_cast<int>(x) + radius);
-                const int minY = (std::max)(0, static_cast<int>(y) - radius);
-                const int maxY = (std::min)(static_cast<int>(height) - 1, static_cast<int>(y) + radius);
+            const size_t neighborIndex = static_cast<size_t>(ny) * width + static_cast<size_t>(nx);
+            if (visited[neighborIndex] != 0)
+                continue;
 
-                uint32_t sumR = 0;
-                uint32_t sumG = 0;
-                uint32_t sumB = 0;
-                uint32_t count = 0;
+            const size_t dstIdx = neighborIndex * 4;
+            if (pixels[dstIdx + 3] != 0)
+                continue;
 
-                for (int sy = minY; sy <= maxY; ++sy)
-                {
-                    for (int sx = minX; sx <= maxX; ++sx)
-                    {
-                        if (sx != minX && sx != maxX && sy != minY && sy != maxY)
-                            continue;
-
-                        const size_t sampleIdx =
-                            (static_cast<size_t>(sy) * width + static_cast<size_t>(sx)) * 4;
-                        if (pixels[sampleIdx + 3] == 0)
-                            continue;
-
-                        sumR += pixels[sampleIdx + 0];
-                        sumG += pixels[sampleIdx + 1];
-                        sumB += pixels[sampleIdx + 2];
-                        ++count;
-                    }
-                }
-
-                if (count > 0)
-                {
-                    fixed[idx + 0] = static_cast<uint8_t>(sumR / count);
-                    fixed[idx + 1] = static_cast<uint8_t>(sumG / count);
-                    fixed[idx + 2] = static_cast<uint8_t>(sumB / count);
-                    found = true;
-                }
-            }
+            fixed[dstIdx + 0] = fixed[srcIdx + 0];
+            fixed[dstIdx + 1] = fixed[srcIdx + 1];
+            fixed[dstIdx + 2] = fixed[srcIdx + 2];
+            visited[neighborIndex] = 1;
+            queue.push_back(static_cast<uint32_t>(neighborIndex));
         }
     }
 
