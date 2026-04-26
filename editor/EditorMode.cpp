@@ -2236,19 +2236,15 @@ void EditorFrame(engine::RendererD3D12& renderer,
     fog.UpdateExplored();
 
     bgPager.Update(camera, renderer.GetFrameIndex());
+    const DirectX::XMFLOAT4 editorGridColor = { 1.0f, 1.0f, 1.0f, 0.15f };
 
     sceneRenderer.RenderFrame(renderer, camera, bgPager,
         renderQueue, lights, occluders,
-        fog, roofs, time);
+        fog, roofs, time, &grid, &editorGridColor);
 
-    // Always draw grid + walls + selection in editor
+    // Grid is drawn as an underlay during RenderFrame. Keep only selection as a
+    // post-frame overlay so placed objects can appear above wall terrain.
     renderer.TransitionBackBufferToRT();
-
-    sceneRenderer.DrawGridOverlay(renderer, camera, grid,
-        1.0f, 1.0f, 1.0f, 0.15f);
-
-    if (sceneLoader.IsLoaded())
-        EditorDrawWalls(sceneRenderer, renderer, grid, sceneLoader.GetSceneData());
 
     EditorDrawSelection(sceneRenderer, renderer, grid, editor);
 
@@ -2528,11 +2524,12 @@ static void EditorSubmitObjects(EditorState& editor,
         inst.rotation = 0.0f;
         inst.sortY = cy;
         inst.textureIndex = objectTexture->GetSRVIndex();
-        inst.depthZ = 0.60f;
+        inst.depthZ = 0.55f;
 
-        // Use the object index as a stable tie-breaker when overlapping objects
-        // resolve to the same Y-sort value.
-        renderQueue.Submit(engine::RenderLayer::WallsProps, inst.sortY, 50,
+        // Keep placed objects on the cutout sprite path so wall/object pixels
+        // render solid, but place them in front of terrain tiles via depth.
+        renderQueue.Submit(engine::RenderLayer::WallsProps,
+                           inst.sortY, 50,
                            static_cast<uint16_t>(objIndex & 0xFFFF), inst);
     }
 }

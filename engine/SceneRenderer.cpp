@@ -170,7 +170,9 @@ void SceneRenderer::RenderFrame(RendererD3D12& renderer,
                                  OccluderSet& occluders,
                                  FogRenderer& fog,
                                  RoofSystem& roofs,
-                                 float time)
+                                 float time,
+                                 const Grid* underlayGrid,
+                                 const DirectX::XMFLOAT4* underlayGridColor)
 {
     auto* cmdList = renderer.GetCommandList();
     auto* device  = renderer.GetDevice();
@@ -217,7 +219,7 @@ void SceneRenderer::RenderFrame(RendererD3D12& renderer,
         m_sceneColor.Clear(cmdList, renderer.GetRTVHeap(), clearColor);
 
         PassBackground(cmdList, renderer, camera, bgPager);
-        PassBaseScene(cmdList, renderer, camera, renderQueue);
+        PassBaseScene(cmdList, renderer, camera, renderQueue, underlayGrid, underlayGridColor);
     }
 
     // --- Pass 3: Dynamic lighting + shadows -> LightAccum ---
@@ -344,10 +346,10 @@ void SceneRenderer::PassBackground(ID3D12GraphicsCommandList* cmdList,
 void SceneRenderer::PassBaseScene(ID3D12GraphicsCommandList* cmdList,
                                    RendererD3D12& renderer,
                                    Camera2D& camera,
-                                   const RenderQueue& renderQueue)
+                                   const RenderQueue& renderQueue,
+                                   const Grid* underlayGrid,
+                                   const DirectX::XMFLOAT4* underlayGridColor)
 {
-    (void)camera;
-
     // Collect items from GroundTiles through RoofActors
     auto groundRange  = renderQueue.GetLayerRange(RenderLayer::GroundTiles);
     auto wallRange    = renderQueue.GetLayerRange(RenderLayer::WallsProps);
@@ -361,7 +363,7 @@ void SceneRenderer::PassBaseScene(ID3D12GraphicsCommandList* cmdList,
                       + (roofRange.end - roofRange.begin)
                       + (roofActRange.end - roofActRange.begin);
 
-    if (totalItems == 0)
+    if (totalItems == 0 && (underlayGrid == nullptr || underlayGridColor == nullptr))
         return;
 
     // Set render target, viewport, and scissor
@@ -378,14 +380,6 @@ void SceneRenderer::PassBaseScene(ID3D12GraphicsCommandList* cmdList,
                             static_cast<LONG>(m_config.fullResHeight) };
     cmdList->RSSetViewports(1, &vp);
     cmdList->RSSetScissorRects(1, &scissor);
-
-    cmdList->SetGraphicsRootSignature(m_pso.GetMainRootSig());
-    cmdList->SetPipelineState(m_pso.GetSpritePSO());
-    cmdList->SetGraphicsRootConstantBufferView(0, m_frameCBVAddress);
-    cmdList->SetGraphicsRootDescriptorTable(1,
-        renderer.GetSRVHeap().GetGPUHandle(0));
-
-    cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 
     // Build instance buffers by blend mode. Walls/props use an opaque cutout
     // PSO so wall pixels stay solid even if the source texture has soft alpha.
@@ -439,6 +433,13 @@ void SceneRenderer::PassBaseScene(ID3D12GraphicsCommandList* cmdList,
     {
         BindSpritePipeline(cmdList, renderer, m_pso, m_frameCBVAddress, m_pso.GetSpritePSO());
         DrawSpriteInstances(cmdList, renderer, groundInstances);
+    }
+
+    if (underlayGrid != nullptr && underlayGridColor != nullptr)
+    {
+        DrawGridOverlayToScene(renderer, camera, *underlayGrid,
+                               underlayGridColor->x, underlayGridColor->y,
+                               underlayGridColor->z, underlayGridColor->w);
     }
 
     if (!cutoutInstances.empty())
@@ -785,6 +786,21 @@ void SceneRenderer::DrawLineOverlay(RendererD3D12& renderer,
                                      size_t vertexCount,
                                      float r, float g, float b, float a)
 {
+    DrawLineOverlayToTarget(renderer, renderer.GetBackBufferRTV(),
+                            nullptr, renderer.GetWidth(), renderer.GetHeight(),
+                            m_pso.GetGridOverlayPSO(),
+                            vertices, vertexCount, r, g, b, a);
+}
+
+void SceneRenderer::DrawLineOverlayToTarget(RendererD3D12& renderer,
+                                             D3D12_CPU_DESCRIPTOR_HANDLE rtv,
+                                             const D3D12_CPU_DESCRIPTOR_HANDLE* dsv,
+                                             uint32_t width, uint32_t height,
+                                             ID3D12PipelineState* pipelineState,
+                                             const DirectX::XMFLOAT2* vertices,
+                                             size_t vertexCount,
+                                             float r, float g, float b, float a)
+{
     if (vertexCount < 2)
         return;
 
@@ -810,22 +826,20 @@ void SceneRenderer::DrawLineOverlay(RendererD3D12& renderer,
         vertexCount * sizeof(DirectX::XMFLOAT2), 16);
     std::memcpy(vtxAlloc.cpuPtr, vertices, vertexCount * sizeof(DirectX::XMFLOAT2));
 
-    // Bind backbuffer RT
-    auto backRTV = renderer.GetBackBufferRTV();
-    cmdList->OMSetRenderTargets(1, &backRTV, FALSE, nullptr);
+    cmdList->OMSetRenderTargets(1, &rtv, FALSE, dsv);
 
     D3D12_VIEWPORT vp = { 0, 0,
-                           static_cast<float>(renderer.GetWidth()),
-                           static_cast<float>(renderer.GetHeight()),
+                           static_cast<float>(width),
+                           static_cast<float>(height),
                            0.0f, 1.0f };
     D3D12_RECT scissor = { 0, 0,
-                            static_cast<LONG>(renderer.GetWidth()),
-                            static_cast<LONG>(renderer.GetHeight()) };
+                            static_cast<LONG>(width),
+                            static_cast<LONG>(height) };
     cmdList->RSSetViewports(1, &vp);
     cmdList->RSSetScissorRects(1, &scissor);
 
     cmdList->SetGraphicsRootSignature(m_pso.GetMainRootSig());
-    cmdList->SetPipelineState(m_pso.GetGridOverlayPSO());
+    cmdList->SetPipelineState(pipelineState);
     cmdList->SetGraphicsRootConstantBufferView(0, cbAlloc.gpuAddress);
     cmdList->SetGraphicsRootDescriptorTable(1,
         renderer.GetSRVHeap().GetGPUHandle(0));
@@ -839,6 +853,101 @@ void SceneRenderer::DrawLineOverlay(RendererD3D12& renderer,
     cmdList->IASetVertexBuffers(0, 1, &vbv);
 
     cmdList->DrawInstanced(static_cast<UINT>(vertexCount), 1, 0, 0);
+}
+
+void SceneRenderer::DrawGridOverlayToScene(RendererD3D12& renderer, Camera2D& camera,
+                                            const Grid& grid,
+                                            float r, float g, float b, float a)
+{
+    auto sceneRTV = renderer.GetRTVHeap().GetCPUHandle(m_sceneColor.GetRTVIndex());
+    auto sceneDSV = renderer.GetDSVHeap().GetCPUHandle(m_depthStencil.GetDSVIndex());
+
+    if (grid.IsIsometric())
+    {
+        auto vb = camera.GetViewBounds();
+        int gw = grid.GetGridWidth();
+        int gh = grid.GetGridHeight();
+
+        std::vector<DirectX::XMFLOAT2> verts;
+        verts.reserve(static_cast<size_t>(gw) * gh * 12);
+
+        for (int ty = 0; ty < gh; ++ty)
+        {
+            for (int tx = 0; tx < gw; ++tx)
+            {
+                DirectX::XMFLOAT2 hex[6];
+                grid.TileHexVertices(tx, ty, hex);
+
+                float minX = hex[0].x;
+                float maxX = hex[3].x;
+                float minY = hex[1].y;
+                float maxY = hex[4].y;
+                if (maxX < vb.left || minX > vb.right ||
+                    maxY < vb.top || minY > vb.bottom)
+                    continue;
+
+                for (int i = 0; i < 6; ++i)
+                {
+                    verts.push_back(hex[i]);
+                    verts.push_back(hex[(i + 1) % 6]);
+                }
+            }
+        }
+
+        if (!verts.empty())
+        {
+            DrawLineOverlayToTarget(renderer, sceneRTV,
+                                    &sceneDSV, m_config.fullResWidth, m_config.fullResHeight,
+                                    m_pso.GetGridOverlayScenePSO(),
+                                    verts.data(), verts.size(), r, g, b, a);
+        }
+        return;
+    }
+
+    auto vb = camera.GetViewBounds();
+    int tileX0, tileY0, tileX1, tileY1;
+    grid.WorldToTile(vb.left, vb.top, tileX0, tileY0);
+    grid.WorldToTile(vb.right, vb.bottom, tileX1, tileY1);
+
+    tileX0 = (std::max)(tileX0 - 1, 0);
+    tileY0 = (std::max)(tileY0 - 1, 0);
+    tileX1 = (std::min)(tileX1 + 1, grid.GetGridWidth());
+    tileY1 = (std::min)(tileY1 + 1, grid.GetGridHeight());
+
+    int cols = tileX1 - tileX0 + 1;
+    int rows = tileY1 - tileY0 + 1;
+    size_t lineCount = static_cast<size_t>(rows + 1) + static_cast<size_t>(cols + 1);
+    size_t vertCount = lineCount * 2;
+
+    std::vector<DirectX::XMFLOAT2> verts;
+    verts.reserve(vertCount);
+
+    float ox = grid.GetOriginX();
+    float oy = grid.GetOriginY();
+    float ts = grid.GetTileSize();
+
+    for (int y = tileY0; y <= tileY1; ++y)
+    {
+        float wy = oy + y * ts;
+        float wx0 = ox + tileX0 * ts;
+        float wx1 = ox + tileX1 * ts;
+        verts.push_back({ wx0, wy });
+        verts.push_back({ wx1, wy });
+    }
+
+    for (int x = tileX0; x <= tileX1; ++x)
+    {
+        float wx = ox + x * ts;
+        float wy0 = oy + tileY0 * ts;
+        float wy1 = oy + tileY1 * ts;
+        verts.push_back({ wx, wy0 });
+        verts.push_back({ wx, wy1 });
+    }
+
+    DrawLineOverlayToTarget(renderer, sceneRTV,
+                            &sceneDSV, m_config.fullResWidth, m_config.fullResHeight,
+                            m_pso.GetGridOverlayScenePSO(),
+                            verts.data(), verts.size(), r, g, b, a);
 }
 
 } // namespace engine

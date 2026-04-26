@@ -34,6 +34,7 @@ public:
     ID3D12PipelineState* GetLightRadialPSO() const { return m_lightRadialPSO.Get(); }
     ID3D12PipelineState* GetCompositePSO() const { return m_compositePSO.Get(); }
     ID3D12PipelineState* GetGridOverlayPSO() const { return m_gridOverlayPSO.Get(); }
+    ID3D12PipelineState* GetGridOverlayScenePSO() const { return m_gridOverlayScenePSO.Get(); }
 
     // Sampler descriptor heap (static samplers are baked into root sig, but
     // we also expose the heap for custom sampling)
@@ -52,6 +53,7 @@ private:
     bool CreateLightRadialPSO(ID3D12Device* device, const std::wstring& shaderDir);
     bool CreateCompositePSO(ID3D12Device* device, const std::wstring& shaderDir);
     bool CreateGridOverlayPSO(ID3D12Device* device, const std::wstring& shaderDir);
+    bool CreateGridOverlayScenePSO(ID3D12Device* device, const std::wstring& shaderDir);
 
     bool CreateSamplerHeap(ID3D12Device* device);
 
@@ -74,6 +76,7 @@ private:
     ComPtr<ID3D12PipelineState> m_lightRadialPSO;
     ComPtr<ID3D12PipelineState> m_compositePSO;
     ComPtr<ID3D12PipelineState> m_gridOverlayPSO;
+    ComPtr<ID3D12PipelineState> m_gridOverlayScenePSO;
 
     // Sampler heap
     ComPtr<ID3D12DescriptorHeap> m_samplerHeap;

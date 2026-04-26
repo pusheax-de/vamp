@@ -101,7 +101,9 @@ public:
                      OccluderSet& occluders,
                      FogRenderer& fog,
                      RoofSystem& roofs,
-                     float time);
+                     float time,
+                     const Grid* underlayGrid = nullptr,
+                     const DirectX::XMFLOAT4* underlayGridColor = nullptr);
 
     // Draw a grid overlay on the backbuffer (call between RenderFrame and EndFrame)
     void DrawGridOverlay(RendererD3D12& renderer, Camera2D& camera, const Grid& grid,
@@ -134,7 +136,9 @@ private:
     void PassBaseScene(ID3D12GraphicsCommandList* cmdList,
                        RendererD3D12& renderer,
                        Camera2D& camera,
-                       const RenderQueue& renderQueue);
+                       const RenderQueue& renderQueue,
+                       const Grid* underlayGrid,
+                       const DirectX::XMFLOAT4* underlayGridColor);
 
     void PassLighting(ID3D12GraphicsCommandList* cmdList,
                       RendererD3D12& renderer,
@@ -171,6 +175,15 @@ private:
     // Isometric grid overlay helper
     void DrawGridOverlayIsometric(RendererD3D12& renderer, Camera2D& camera, const Grid& grid,
                                    float r, float g, float b, float a);
+    void DrawGridOverlayToScene(RendererD3D12& renderer, Camera2D& camera, const Grid& grid,
+                                float r, float g, float b, float a);
+    void DrawLineOverlayToTarget(RendererD3D12& renderer,
+                                 D3D12_CPU_DESCRIPTOR_HANDLE rtv,
+                                 const D3D12_CPU_DESCRIPTOR_HANDLE* dsv,
+                                 uint32_t width, uint32_t height,
+                                 ID3D12PipelineState* pipelineState,
+                                 const DirectX::XMFLOAT2* vertices, size_t vertexCount,
+                                 float r, float g, float b, float a);
 };
 
 } // namespace engine

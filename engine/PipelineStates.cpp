@@ -72,6 +72,7 @@ bool PipelineStates::Init(ID3D12Device* device, const std::wstring& shaderDir)
     if (!CreateLightRadialPSO(device, shaderDir))   return false;
     if (!CreateCompositePSO(device, shaderDir))     return false;
     if (!CreateGridOverlayPSO(device, shaderDir))   return false;
+    if (!CreateGridOverlayScenePSO(device, shaderDir)) return false;
 
     return true;
 }
@@ -86,6 +87,7 @@ void PipelineStates::Shutdown()
     m_lightRadialPSO.Reset();
     m_compositePSO.Reset();
     m_gridOverlayPSO.Reset();
+    m_gridOverlayScenePSO.Reset();
     m_mainRootSig.Reset();
     m_lightRootSig.Reset();
     m_compositeRootSig.Reset();
@@ -616,6 +618,48 @@ bool PipelineStates::CreateGridOverlayPSO(ID3D12Device* device, const std::wstri
     blend.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 
     return SUCCEEDED(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_gridOverlayPSO)));
+}
+
+bool PipelineStates::CreateGridOverlayScenePSO(ID3D12Device* device, const std::wstring& shaderDir)
+{
+    auto vs = CompileShader(shaderDir + L"/GridOverlayVS.hlsl", "main", "vs_5_1");
+    auto ps = CompileShader(shaderDir + L"/GridOverlayPS.hlsl", "main", "ps_5_1");
+    if (!vs || !ps) return false;
+
+    D3D12_INPUT_ELEMENT_DESC inputLayout[] =
+    {
+        { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+    };
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.pRootSignature        = m_mainRootSig.Get();
+    psoDesc.VS                    = { vs->GetBufferPointer(), vs->GetBufferSize() };
+    psoDesc.PS                    = { ps->GetBufferPointer(), ps->GetBufferSize() };
+    psoDesc.InputLayout           = { inputLayout, _countof(inputLayout) };
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
+    psoDesc.NumRenderTargets      = 1;
+    psoDesc.RTVFormats[0]         = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+    psoDesc.DSVFormat             = DXGI_FORMAT_D24_UNORM_S8_UINT;
+    psoDesc.SampleDesc            = { 1, 0 };
+    psoDesc.SampleMask            = UINT_MAX;
+    psoDesc.RasterizerState.FillMode              = D3D12_FILL_MODE_SOLID;
+    psoDesc.RasterizerState.CullMode              = D3D12_CULL_MODE_NONE;
+    psoDesc.RasterizerState.DepthClipEnable       = TRUE;
+    psoDesc.RasterizerState.AntialiasedLineEnable = TRUE;
+    psoDesc.DepthStencilState.DepthEnable         = FALSE;
+    psoDesc.DepthStencilState.StencilEnable       = FALSE;
+
+    auto& blend = psoDesc.BlendState.RenderTarget[0];
+    blend.BlendEnable           = TRUE;
+    blend.SrcBlend              = D3D12_BLEND_SRC_ALPHA;
+    blend.DestBlend             = D3D12_BLEND_INV_SRC_ALPHA;
+    blend.BlendOp               = D3D12_BLEND_OP_ADD;
+    blend.SrcBlendAlpha         = D3D12_BLEND_ONE;
+    blend.DestBlendAlpha        = D3D12_BLEND_INV_SRC_ALPHA;
+    blend.BlendOpAlpha          = D3D12_BLEND_OP_ADD;
+    blend.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+    return SUCCEEDED(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_gridOverlayScenePSO)));
 }
 
 // ===========================================================================
