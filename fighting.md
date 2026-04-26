@@ -2,16 +2,28 @@
 
 This document defines practical combat expectations for the current RPG system in `game/CombatSystem.*`, `game/Character.*`, `game/Weapon.h`, `game/Armor.h`, and `game/Discipline.*`. It is intended as a design reference for later NPC-vs-NPC and player-vs-NPC simulation.
 
-## 1. System Summary
+## How to read this document
+
+Each major section is tagged with one of:
+
+- **[IMPLEMENTED]** -- the described mechanic exists in code today and matches the numbers given here. Treat the section as documentation.
+- **[PARTIAL]** -- the described mechanic exists in code but numbers, edge cases, or interactions may not match exactly. Verify against the cited source files before relying on specific values.
+- **[DESIGN]** -- not in code. The section describes intended behavior or future work. Do not treat numbers as ground truth.
+
+When in doubt, the source files cited at the top of this document are authoritative; this doc is the design intent.
+
+---
+
+## 1. System Summary  **[IMPLEMENTED]**
 
 Combat is a turn-based attrition system built around:
 
-- `3d6 <= target number` checks.
-- Effective combat score = `primary attribute + skill rank + modifiers`.
-- Derived action points per turn = `6 + floor(AGI / 2)`.
-- Derived HP = `8 + END + floor(STR / 2)`.
-- Initiative = `AGI + PER + 1d6`.
-- Flat damage reduction from armor and Hemocraft armor.
+- `3d6 <= target number` checks. (`Skill.cpp`, `Dice.cpp`)
+- Effective combat score = `primary attribute + skill rank + modifiers`. (`Character::SkillEffective`)
+- Derived action points per turn = `6 + floor(AGI / 2)`. (`Attributes.h`)
+- Derived HP = `8 + END + floor(STR / 2)`. (`Attributes.h`)
+- Initiative = `AGI + PER + 1d6`. (`CombatSystem::RollInitiative`)
+- Flat damage reduction from armor and Hemocraft armor. (`Armor.h`, `Discipline.cpp`)
 
 This creates a system where:
 
@@ -20,9 +32,9 @@ This creates a system where:
 - AP economy matters as much as raw damage.
 - Wound effects rapidly snowball fights after the first solid hit.
 
-## 2. Practical Meaning of "Level"
+## 2. Practical Meaning of "Level"  **[DESIGN]**
 
-The code does not define a single character level. For combat analysis, use three bands:
+The code does not define a single character level. For combat analysis, use three bands. These bands are a balancing convention for this document; nothing in the code references them.
 
 - `Low-tier`: primary combat attribute `4-5`, key combat skill rank `0-1`, light armor or none, basic weapon.
 - `Mid-tier`: primary combat attribute `6-8`, key combat skill rank `2-3`, kevlar or tactical armor, competent weapon loadout.
@@ -44,9 +56,9 @@ Useful benchmark target numbers before cover/range:
 
 On 3d6, the curve is steep. A difference of `+2` to `+4` in target number is a major swing, not a minor one.
 
-## 3. Baseline Archetypes for Simulation
+## 3. Baseline Archetypes for Simulation  **[DESIGN]**
 
-Use these as anchors when designing NPC rosters.
+Use these as anchors when designing NPC rosters. None of these are encoded as templates in the codebase yet; they are recommendations for whoever implements the NPC roster.
 
 ### 3.1 Street Civilian
 
@@ -87,17 +99,19 @@ Use these as anchors when designing NPC rosters.
 
 These are the main reasons one side wins.
 
-### 4.1 AP Economy
+### 4.1 AP Economy  **[PARTIAL]**
+
+The action types and approximate AP costs below match `CombatSystem::ActionType` and the cost branches in `CombatSystem.cpp`. A few specifics (suppression duration, exact stun AP penalty) are subject to tuning -- check `StatusEffect.cpp` and `Character::BeginTurn` if exact values matter.
 
 Most common AP costs:
 
-- Move: `1` or tile move cost.
-- Aim: `1` for `+2`, stacking to `+6`.
-- Single shot: `3`.
-- Burst: `4`.
+- Move: `1` or tile move cost (`MapTile::moveCost`, doubled if `CrippledLeg`).
+- Aim: `1` for `+2`, stackable to `+6`.
+- Single shot: `3` (or weapon's `apCostSingle`).
+- Burst: `4` (or weapon's `apCostBurst`).
 - Reload: `2`.
 - Overwatch: `2`.
-- Melee: `2-3`.
+- Melee: `2-3` (weapon's `apCostSingle`).
 - Bandage/stim: `2`.
 
 Typical consequences:
@@ -106,29 +120,32 @@ Typical consequences:
 - A character with `10-12 AP` from high AGI or Celerity can create decisive tempo turns.
 - `Pinned` and `Stunned` are brutal because each removes `2 AP` next turn.
 
-### 4.2 Cover and Range
+### 4.2 Cover and Range  **[IMPLEMENTED]**
 
-Cover imposes direct hit penalties:
+Cover imposes direct hit penalties via `CoverSystem::QueryCoverBetween` and is applied in `CombatSystem::CalculateHitTarget`:
 
 - Half cover effectively costs the attacker `-2`.
 - Full cover effectively costs `-4`.
 - Diagonal/flanked attacks remove directional cover.
+
+Range penalty is `-1` per tile beyond the weapon's effective range, also applied in `CalculateHitTarget`.
 
 Implications:
 
 - Two equally skilled shooters can differ by an entire combat tier if only one is in cover.
 - Fights should be understood as contests over lane control and flank creation, not just damage races.
 
-### 4.3 Armor and Damage
+### 4.3 Armor and Damage  **[IMPLEMENTED]**
 
-Weapons deal mostly `2d6 + bonus` at range, `1d6-3d6 + bonus` in melee.
-Armor gives flat DR:
+Weapons deal mostly `2d6 + bonus` at range, `1d6-3d6 + bonus` in melee. See the `WeaponData` table in `Weapon.h` for exact dice/bonus per weapon.
+
+Armor gives flat DR (see `Armor.h`):
 
 - Light clothing: `1`.
 - Kevlar: `3`.
 - Tactical armor: `5`.
 - Heavy armor: `7`.
-- Hemocraft armor: `+3 to +8` temporary DR depending on rank.
+- Hemocraft armor: `+3 to +8` temporary DR depending on rank (`Discipline.cpp`).
 
 Implications:
 
@@ -136,9 +153,9 @@ Implications:
 - Against tactical armor or Hemocraft armor, low-damage weapons lose efficiency quickly.
 - Shotguns, sniper rifles, machetes, swords, and Blood Spike matter because they cross DR thresholds more reliably.
 
-### 4.4 Wound Snowball
+### 4.4 Wound Snowball  **[IMPLEMENTED]**
 
-The first meaningful hit often changes the rest of the fight:
+The first meaningful hit often changes the rest of the fight. Thresholds are in `CombatSystem::ApplyWoundEffects`:
 
 - `4+` damage causes Bleeding.
 - `6+` damage causes Stunned.
@@ -147,13 +164,13 @@ The first meaningful hit often changes the rest of the fight:
 This means combat is not linear. Once one side lands a strong hit:
 
 - AP falls on the next turn.
-- accuracy falls from Stunned or Crippled Arm.
-- movement degrades from Crippled Leg.
-- untreated Bleeding accelerates collapse.
+- Accuracy falls from Stunned or Crippled Arm.
+- Movement degrades from Crippled Leg.
+- Untreated Bleeding accelerates collapse.
 
-## 5. Matchup Expectations by Tier
+## 5. Matchup Expectations by Tier  **[DESIGN]**
 
-These are practical, not exact, odds.
+These are practical, not exact, odds. They have not been validated against simulation -- there is no NPC-vs-NPC simulator in the codebase yet (see section 8 onward).
 
 ### 5.1 Equal Tier
 
@@ -181,7 +198,9 @@ A two-tier advantage is decisive in small engagements.
 - In `1v3`, the stronger fighter becomes coin-flip to favored if the enemies are low-tier and poorly coordinated.
 - In `1v5`, even a two-tier advantage is fragile without area effects, stealth cycling, or hard cover.
 
-## 6. Scenario Analysis
+## 6. Scenario Analysis  **[DESIGN]**
+
+All of section 6 is design intent. None of the scenarios have been simulated; they reflect how the implemented mechanics in section 4 are expected to interact.
 
 ## 6.1 One vs One
 
@@ -372,7 +391,7 @@ Likely outcomes:
 - Good pair coordination turns `2v5` into a sequence of `2v1` or `2v2` local fights.
 - Poor coordination turns it into two separate losses.
 
-## 7. Recommended Encounter Balance Rules
+## 7. Recommended Encounter Balance Rules  **[DESIGN]**
 
 Use these heuristics when building test fights.
 
@@ -381,6 +400,14 @@ Use these heuristics when building test fights.
 - `1v3 boss fight`: solo should be two tiers stronger or have meaningful discipline advantages.
 - `1v5 boss showcase`: only for elite vampire or scripted ambush terrain.
 - `2v5 heroic but plausible`: pair should have either one tier advantage, strong map control, or a complementary discipline kit.
+
+---
+
+# Part II: NPC AI Design  **[DESIGN]**
+
+Everything from this point on is design for future work. None of the AI systems described below exist in code yet. There is currently no NPC turn-taking, no AI loop, and no NPC-vs-NPC simulator. NPCs in `SceneData` carry behavior tags (`Idle`, `Patrol`, `Guard`, `Merchant`, `QuestGiver`, `Civilian`) but no AI consumes them.
+
+When implementing this, expect to add new files under `game/` (e.g. `AISystem.h/.cpp`, `Squad.h/.cpp`) and wire them through `CombatSystem`.
 
 ## 8. Trivial NPC AI for First Simulations
 
@@ -558,6 +585,8 @@ Log the following for every simulation:
 - status applications.
 - turns survived.
 - whether victory came from raw damage, status snowball, or positioning collapse.
+
+A reasonable first home for the simulator is a separate `int main()` harness in a new file like `game/CombatSimMain.cpp`, gated by a `--combatsim` command-line flag in `wWinMain` (similar to how `--editor` is gated). This avoids needing a full second project and reuses all of `game/`.
 
 ## 13. Final Design Conclusions
 

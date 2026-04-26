@@ -8,15 +8,15 @@ You play as a human who gets infected by a vampire in a modern city. Dive into t
 
 ## Current State
 
-The project has a working **custom D3D12 rendering engine**, a complete set of **RPG game systems**, and an **in-game scene editor**. The rendering pipeline supports isometric tile maps, dynamic point lights with stencil shadow volumes, fog-of-war, roof fade, and a batched UI overlay. A procedurally generated 32x32 test scene exercises all engine and data systems.
+The project has a working **custom D3D12 rendering engine**, a complete set of **RPG game systems**, and an **in-game scene editor**. The rendering pipeline supports isometric hex tile maps, dynamic point lights with stencil shadow volumes, fog-of-war, roof fade, and a batched UI overlay. A procedurally generated 32x32 test scene exercises all engine and data systems.
 
 ### What Works
 - Direct3D 12 renderer with multi-pass pipeline (sprites, shadow volumes, radial lights, fog composite)
-- 2:1 diamond isometric tile grid with world/screen coordinate transforms
+- Isometric flat-top hex tile grid with world/screen coordinate transforms
 - Binary scene format (`.vmp`) with full serialization of tiles, NPCs, items, lights, triggers, transitions, shops, safehouses, territories
 - Procedural test scene generation (32x32 map with walls, NPCs, items, lights, patrol routes)
 - Player character movement (WASD) with mouse-facing indicator
-- Camera controls (MMB/RMB drag pan, scroll zoom)
+- Camera controls (RMB drag pan, scroll zoom)
 - Fog-of-war with CPU raycasting against occluder edges
 - Dynamic point lights with flickering, shadow casting via stencil volumes
 - Roof system with fade-on-enter when player enters a building
@@ -29,8 +29,9 @@ The project has a working **custom D3D12 rendering engine**, a complete set of *
 - Sleep/safehouse system with ambush mechanics
 - Runtime bitmap font atlas generation from Windows GDI
 - Immediate-mode UI system with panels, labels, and searchable dropdowns
-- **In-game editor** (`--editor` flag) with tile painting, item placement, object placement, and Ctrl+S save
+- **In-game editor** (`--editor` flag) with tile painting, item placement, object placement, light placement, and Ctrl+S save
 - Editor dropdown selectors with search/filter for terrain and item types
+- Configurable editor hotkeys via `editor.ini`
 
 ### What's Not Done Yet
 - Actual gameplay loop (turns, enemy AI, win/lose conditions)
@@ -79,6 +80,8 @@ All checks: **3d6 <= (Attribute + SkillRank + modifiers)**
 - Overwatch, suppression, burst fire
 - Wound effects: Bleeding, Stunned, Crippled, Pinned
 
+See `fighting.md` for the full combat doctrine, encounter balance reasoning, and NPC AI design.
+
 ### Vampire Disciplines
 Powered by **Blood Reserve** (max 6 + Blood Potency), replenished by sleep or risky feeding.
 
@@ -114,7 +117,7 @@ The renderer uses Direct3D 12 with a multi-pass architecture:
 3. **Lighting pass** (LightAccum RT, half-res R11G11B10_FLOAT): Stencil shadow volumes from occluder edges, then radial falloff quads with stencil test (additive blend). Up to 32 dynamic point lights.
 4. **Composite pass** (Backbuffer): Fullscreen triangle combines scene color with fog darkening and light accumulation.
 5. **UI pass** (Backbuffer): Screen-space quad batching (panels, text, dropdowns) via orthographic sprite PSO.
-6. **Debug overlays** (optional, Backbuffer): Grid diamond wireframes and wall edge highlights.
+6. **Debug overlays** (optional, Backbuffer): Hex wireframes and wall edge highlights.
 
 Sprites are rendered as instanced triangle strips (4 vertices per quad, 64-byte `SpriteInstance`). The vertex shader generates corners from `SV_VertexID`; the pixel shader does bindless texture lookup via `textures[instanceTexIndex].Sample()` with a 1024-slot SRV heap.
 
@@ -122,13 +125,12 @@ Sprites are rendered as instanced triangle strips (4 vertices per quad, 64-byte 
 
 Launch with `--editor` command line flag. The editor provides:
 
-- **LMB** selects tiles for terrain painting (Shift+LMB to multi-select)
-- **RMB** selects tiles for item/object placement
-- **Searchable dropdown menus** appear on selection for choosing terrain types or items (type to filter)
-- **Keyboard hotkeys** still work alongside dropdowns (F=Floor, L=Wall, etc.)
+- **LMB** opens a context menu on the clicked tile (Shift+LMB to multi-select)
+- **Searchable dropdown menus** for choosing terrain types or items (type to filter)
+- **Configurable hotkeys** via `editor.ini` next to the executable
 - **Ctrl+S** saves the scene to the `.vmp` file
 - **ESC** cancels the current selection
-- Grid, wall edges, and selection diamond outlines are always visible
+- Grid, wall edges, and selection outlines are always visible
 - Object textures loaded on demand with placeholder fallback
 
 ### Editor Terrain Types
@@ -140,7 +142,7 @@ Hangar (object), Bandage, Stimpack, Antidote, Flashbang, Blood Vial, Delete
 ## Project Structure
 
 ```
-vampire.sln / vampire.vcxproj   Solution and project files
+vampire.sln / vampire.vcxproj   Solution and project files (vcxproj is hand-maintained)
 vampire.cpp                      Win32 entry point, game loop, engine wiring
 framework.h                      Precompiled Windows includes
 
@@ -154,7 +156,7 @@ engine/                          Custom 2D rendering engine (D3D12)
   RenderTarget.h / .cpp          Render target and depth/stencil wrappers
   PipelineStates.h / .cpp        All root signatures and PSOs
   Camera2D.h                     Orthographic camera with world/screen transforms
-  Grid.h                         Isometric tile-grid coordinate system
+  Grid.h                         Tile-grid coordinate system (rectangular or isometric flat-top hex)
   InputSystem.h                  Keyboard/mouse input, camera control, tile picking, WM_CHAR
   BackgroundPager.h / .cpp       Paged DDS background streaming + single PNG background
   RenderQueue.h                  Sortable sprite queue with layer-based draw order
@@ -174,7 +176,7 @@ engine/                          Custom 2D rendering engine (D3D12)
     CompositeVS/PS.hlsl          Final scene + fog + light compositing
     GridOverlayVS/PS.hlsl        Debug grid and wall line overlays
 
-game/                            RPG systems and game logic
+game/                            RPG systems and game logic (namespace `vamp`)
   GameSystems.h                  Master include for all game headers
   SceneData.h                    Complete scene data structures for .vmp format
   SceneFile.h / .cpp             Binary serialization of .vmp scene files
@@ -198,10 +200,12 @@ game/                            RPG systems and game logic
   SocialSystem.h / .cpp          Dialogue, persuasion, deception, empathy
   SleepSystem.h / .cpp           Safehouses, sleep, ambush, feeding
 
-editor/                          In-game scene editor
-  EditorMode.h / .cpp            Tile painting, item/object placement, dropdown UI, save
+editor/                          In-game scene editor (no namespace; global types)
+  EditorMode.h / .cpp            Tile painting, item/object placement, light placement,
+                                 context-menu UI, dropdown selectors, configurable hotkeys,
+                                 Ctrl+S save
 
-ui/                              Immediate-mode UI system
+ui/                              Immediate-mode UI system (namespace `ui`)
   UI.h                           Master include header
   UITypes.h                      Core types: Rect, Color, Anchor, TextAlign
   BitmapFont.h / .cpp            Runtime font atlas from Windows GDI
@@ -224,6 +228,14 @@ Open `vampire.sln` in Visual Studio 2022 and build (Debug/x64). Requires:
 - No external dependencies -- all libraries are linked via `#pragma comment(lib)` (d3d12, dxgi, d3dcompiler, windowscodecs)
 
 The post-build step copies `engine/shaders/` and `assets/` to the output directory. Shaders are compiled from HLSL source at runtime.
+
+### Adding new source files
+The `vampire.vcxproj` is hand-maintained -- adding a new `.h` or `.cpp` requires either using *Add -> Existing Item* in Visual Studio (which updates both `.vcxproj` and `.vcxproj.filters`) or editing both files manually. See `AGENTS.md` for details.
+
+### Build helper scripts
+- `copyAssets.ps1` -- re-copies `assets/` to `x64/Debug/assets/` if the post-build step did not run.
+- `copyToUSB.ps1` / `copyFromUSB.ps1` -- developer sync scripts, not needed for normal builds.
+- `update_vcxproj.ps1` / `update_filters.ps1` -- one-shot migration scripts; do not run on the current vcxproj.
 
 ### Running
 - **Game mode:** Run `vampire.exe` normally
