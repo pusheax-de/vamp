@@ -91,6 +91,7 @@ static void DiscoverEditorAssets(EditorState& editor);
 static void RebuildEditorLights(const vamp::SceneData& scene,
                                 engine::LightSystem& lights,
                                 const engine::Grid& grid);
+static int TileDistanceToBox(int tx, int ty, int x0, int y0, int x1, int y1);
 
 // ---------------------------------------------------------------------------
 // Helpers: build a MapTile from terrain type with sensible defaults
@@ -1048,6 +1049,19 @@ static void RebuildEditorLights(const vamp::SceneData& scene,
         lights.AddLight(lightX, lightY, light.r, light.g, light.b,
             light.radius, intensity, light.flickerPhase);
     }
+}
+
+static int TileDistanceToBox(int tx, int ty, int x0, int y0, int x1, int y1)
+{
+    int dx = 0;
+    if (tx < x0) dx = x0 - tx;
+    else if (tx > x1) dx = tx - x1;
+
+    int dy = 0;
+    if (ty < y0) dy = y0 - ty;
+    else if (ty > y1) dy = ty - y1;
+
+    return (std::max)(dx, dy);
 }
 
 // ---------------------------------------------------------------------------
@@ -2211,7 +2225,8 @@ void EditorFrame(engine::RendererD3D12& renderer,
     if (sceneLoader.IsLoaded())
     {
         EditorSubmitGroundTiles(editor, sceneLoader.GetSceneData(), grid, renderQueue, renderer);
-        EditorSubmitObjects(editor, sceneLoader.GetSceneData(), grid, renderQueue, renderer);
+        EditorSubmitObjects(editor, sceneLoader.GetSceneData(), grid,
+            renderQueue, renderer);
         EditorSubmitLightMarkers(editor, sceneLoader.GetSceneData(), grid, renderQueue, renderer);
     }
 
@@ -2402,7 +2417,7 @@ static engine::Texture2D* EnsureObjectTexture(EditorState& editor,
         pixels[i * 4 + 0] = 60;
         pixels[i * 4 + 1] = 100;
         pixels[i * 4 + 2] = 180;
-        pixels[i * 4 + 3] = 200;
+        pixels[i * 4 + 3] = 255;
     }
 
     if (cache->texture.CreateFromRGBA(
@@ -2509,7 +2524,7 @@ static void EditorSubmitObjects(EditorState& editor,
         inst.position = {cx, cy};
         inst.size = {drawW, drawH};
         inst.uvRect = {0.0f, 0.0f, 1.0f, 1.0f};
-        inst.color = {1.0f, 1.0f, 1.0f, 0.85f};
+        inst.color = {1.0f, 1.0f, 1.0f, 1.0f};
         inst.rotation = 0.0f;
         inst.sortY = cy;
         inst.textureIndex = objectTexture->GetSRVIndex();

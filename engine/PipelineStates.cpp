@@ -65,6 +65,7 @@ bool PipelineStates::Init(ID3D12Device* device, const std::wstring& shaderDir)
     if (!CreateSamplerHeap(device))             return false;
 
     if (!CreateSpritePSO(device, shaderDir))        return false;
+    if (!CreateSpriteCutoutPSO(device, shaderDir))  return false;
     if (!CreateSpriteScreenPSO(device, shaderDir))  return false;
     if (!CreateSpriteScreenPointPSO(device, shaderDir)) return false;
     if (!CreateShadowVolumePSO(device, shaderDir))  return false;
@@ -78,6 +79,7 @@ bool PipelineStates::Init(ID3D12Device* device, const std::wstring& shaderDir)
 void PipelineStates::Shutdown()
 {
     m_spritePSO.Reset();
+    m_spriteCutoutPSO.Reset();
     m_spriteScreenPSO.Reset();
     m_spriteScreenPointPSO.Reset();
     m_shadowVolumePSO.Reset();
@@ -307,6 +309,50 @@ bool PipelineStates::CreateSpritePSO(ID3D12Device* device, const std::wstring& s
     blend.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 
     return SUCCEEDED(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_spritePSO)));
+}
+
+bool PipelineStates::CreateSpriteCutoutPSO(ID3D12Device* device, const std::wstring& shaderDir)
+{
+    auto vs = CompileShader(shaderDir + L"/SpriteVS.hlsl", "main", "vs_5_1");
+    auto ps = CompileShader(shaderDir + L"/SpritePS.hlsl", "main", "ps_5_1");
+    if (!vs || !ps) return false;
+
+    D3D12_INPUT_ELEMENT_DESC inputLayout[] =
+    {
+        { "INST_POS",    0, DXGI_FORMAT_R32G32_FLOAT,       1, 0,  D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+        { "INST_SIZE",   0, DXGI_FORMAT_R32G32_FLOAT,       1, 8,  D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+        { "INST_UVRECT", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 16, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+        { "INST_COLOR",  0, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 32, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+        { "INST_ROT",    0, DXGI_FORMAT_R32_FLOAT,          1, 48, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+        { "INST_SORTY",  0, DXGI_FORMAT_R32_FLOAT,          1, 52, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+        { "INST_TEX",    0, DXGI_FORMAT_R32_UINT,           1, 56, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+        { "INST_DEPTH",  0, DXGI_FORMAT_R32_FLOAT,          1, 60, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+    };
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.pRootSignature        = m_mainRootSig.Get();
+    psoDesc.VS                    = { vs->GetBufferPointer(), vs->GetBufferSize() };
+    psoDesc.PS                    = { ps->GetBufferPointer(), ps->GetBufferSize() };
+    psoDesc.InputLayout           = { inputLayout, _countof(inputLayout) };
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets      = 1;
+    psoDesc.RTVFormats[0]         = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+    psoDesc.DSVFormat             = DXGI_FORMAT_D24_UNORM_S8_UINT;
+    psoDesc.SampleDesc            = { 1, 0 };
+    psoDesc.SampleMask            = UINT_MAX;
+    psoDesc.RasterizerState.FillMode              = D3D12_FILL_MODE_SOLID;
+    psoDesc.RasterizerState.CullMode              = D3D12_CULL_MODE_NONE;
+    psoDesc.RasterizerState.DepthClipEnable       = TRUE;
+    psoDesc.DepthStencilState.DepthEnable         = TRUE;
+    psoDesc.DepthStencilState.DepthWriteMask      = D3D12_DEPTH_WRITE_MASK_ALL;
+    psoDesc.DepthStencilState.DepthFunc           = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+    psoDesc.DepthStencilState.StencilEnable       = FALSE;
+
+    auto& blend = psoDesc.BlendState.RenderTarget[0];
+    blend.BlendEnable           = FALSE;
+    blend.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+    return SUCCEEDED(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_spriteCutoutPSO)));
 }
 
 bool PipelineStates::CreateSpriteScreenPSO(ID3D12Device* device, const std::wstring& shaderDir)

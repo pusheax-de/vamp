@@ -24,6 +24,40 @@ namespace
         default:                             return 0.50f;
         }
     }
+
+    static void BindSpritePipeline(ID3D12GraphicsCommandList* cmdList,
+                                   RendererD3D12& renderer,
+                                   PipelineStates& pso,
+                                   D3D12_GPU_VIRTUAL_ADDRESS frameCBVAddress,
+                                   ID3D12PipelineState* pipelineState)
+    {
+        cmdList->SetGraphicsRootSignature(pso.GetMainRootSig());
+        cmdList->SetPipelineState(pipelineState);
+        cmdList->SetGraphicsRootConstantBufferView(0, frameCBVAddress);
+        cmdList->SetGraphicsRootDescriptorTable(1, renderer.GetSRVHeap().GetGPUHandle(0));
+        cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+    }
+
+    static void DrawSpriteInstances(ID3D12GraphicsCommandList* cmdList,
+                                    RendererD3D12& renderer,
+                                    const std::vector<SpriteInstance>& instances)
+    {
+        if (instances.empty())
+            return;
+
+        auto alloc = renderer.GetUploadManager().Allocate(
+            instances.size() * sizeof(SpriteInstance), 16);
+        std::memcpy(alloc.cpuPtr, instances.data(),
+                    instances.size() * sizeof(SpriteInstance));
+
+        D3D12_VERTEX_BUFFER_VIEW ibv;
+        ibv.BufferLocation = alloc.gpuAddress;
+        ibv.SizeInBytes    = static_cast<UINT>(instances.size() * sizeof(SpriteInstance));
+        ibv.StrideInBytes  = sizeof(SpriteInstance);
+        cmdList->IASetVertexBuffers(1, 1, &ibv);
+
+        cmdList->DrawInstanced(4, static_cast<UINT>(instances.size()), 0, 0);
+    }
 }
 
 // ===========================================================================
@@ -353,9 +387,16 @@ void SceneRenderer::PassBaseScene(ID3D12GraphicsCommandList* cmdList,
 
     cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 
-    // Build instance buffer from all scene layers (already sorted)
-    std::vector<SpriteInstance> instances;
-    instances.reserve(totalItems);
+    // Build instance buffers by blend mode. Walls/props use an opaque cutout
+    // PSO so wall pixels stay solid even if the source texture has soft alpha.
+    std::vector<SpriteInstance> groundInstances;
+    std::vector<SpriteInstance> cutoutInstances;
+    std::vector<SpriteInstance> overlayInstances;
+    groundInstances.reserve(groundRange.end - groundRange.begin);
+    cutoutInstances.reserve(wallRange.end - wallRange.begin);
+    overlayInstances.reserve((actorRange.end - actorRange.begin)
+                           + (roofRange.end - roofRange.begin)
+                           + (roofActRange.end - roofActRange.begin));
 
     const auto& items = renderQueue.GetItems();
     for (size_t i = groundRange.begin; i < groundRange.end; ++i)
@@ -363,52 +404,54 @@ void SceneRenderer::PassBaseScene(ID3D12GraphicsCommandList* cmdList,
         SpriteInstance inst = items[i].instance;
         if (inst.depthZ <= 0.0f)
             inst.depthZ = DepthForLayer(RenderLayer::GroundTiles);
-        instances.push_back(inst);
+        groundInstances.push_back(inst);
     }
     for (size_t i = wallRange.begin; i < wallRange.end; ++i)
     {
         SpriteInstance inst = items[i].instance;
         if (inst.depthZ <= 0.0f)
             inst.depthZ = DepthForLayer(RenderLayer::WallsProps);
-        instances.push_back(inst);
+        cutoutInstances.push_back(inst);
     }
     for (size_t i = actorRange.begin; i < actorRange.end; ++i)
     {
         SpriteInstance inst = items[i].instance;
         if (inst.depthZ <= 0.0f)
             inst.depthZ = DepthForLayer(RenderLayer::Actors);
-        instances.push_back(inst);
+        overlayInstances.push_back(inst);
     }
     for (size_t i = roofRange.begin; i < roofRange.end; ++i)
     {
         SpriteInstance inst = items[i].instance;
         if (inst.depthZ <= 0.0f)
             inst.depthZ = DepthForLayer(RenderLayer::Roofs);
-        instances.push_back(inst);
+        overlayInstances.push_back(inst);
     }
     for (size_t i = roofActRange.begin; i < roofActRange.end; ++i)
     {
         SpriteInstance inst = items[i].instance;
         if (inst.depthZ <= 0.0f)
             inst.depthZ = DepthForLayer(RenderLayer::RoofActors);
-        instances.push_back(inst);
+        overlayInstances.push_back(inst);
     }
 
-    if (instances.empty())
-        return;
+    if (!groundInstances.empty())
+    {
+        BindSpritePipeline(cmdList, renderer, m_pso, m_frameCBVAddress, m_pso.GetSpritePSO());
+        DrawSpriteInstances(cmdList, renderer, groundInstances);
+    }
 
-    auto alloc = renderer.GetUploadManager().Allocate(
-        instances.size() * sizeof(SpriteInstance), 16);
-    std::memcpy(alloc.cpuPtr, instances.data(),
-                instances.size() * sizeof(SpriteInstance));
+    if (!cutoutInstances.empty())
+    {
+        BindSpritePipeline(cmdList, renderer, m_pso, m_frameCBVAddress, m_pso.GetSpriteCutoutPSO());
+        DrawSpriteInstances(cmdList, renderer, cutoutInstances);
+    }
 
-    D3D12_VERTEX_BUFFER_VIEW ibv;
-    ibv.BufferLocation = alloc.gpuAddress;
-    ibv.SizeInBytes    = static_cast<UINT>(instances.size() * sizeof(SpriteInstance));
-    ibv.StrideInBytes  = sizeof(SpriteInstance);
-    cmdList->IASetVertexBuffers(1, 1, &ibv);
-
-    cmdList->DrawInstanced(4, static_cast<UINT>(instances.size()), 0, 0);
+    if (!overlayInstances.empty())
+    {
+        BindSpritePipeline(cmdList, renderer, m_pso, m_frameCBVAddress, m_pso.GetSpritePSO());
+        DrawSpriteInstances(cmdList, renderer, overlayInstances);
+    }
 }
 
 // ===========================================================================
