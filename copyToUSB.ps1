@@ -49,6 +49,7 @@ $includeEntries = @(
     "assets",
     "AGENTS.md",
     "README.md",
+    "fighting.md",
     "vampire.sln",
     "vampire.vcxproj",
     "vampire.vcxproj.filters",
