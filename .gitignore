@@ -32,6 +32,7 @@ ipch/
 vampire/x64/
 vampire/Debug/
 vampire/Release/
+MCP/build
 
 # OS
 Thumbs.db
