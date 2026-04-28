@@ -35,6 +35,13 @@ static void EditorSubmitLightMarkers(EditorState& editor,
                                      const engine::Grid& grid,
                                      engine::RenderQueue& renderQueue,
                                      engine::RendererD3D12& renderer);
+static void EnsureTileFillTexture(EditorState& editor,
+                                  engine::RendererD3D12& renderer);
+static void EditorSubmitTileColorFills(EditorState& editor,
+                                       const vamp::SceneData& scene,
+                                       const engine::Grid& grid,
+                                       engine::RenderQueue& renderQueue,
+                                       engine::RendererD3D12& renderer);
 static std::string SceneObjectDisplayName(const EditorState& editor, const vamp::SceneObject& obj);
 static const char* SceneLightDisplayName(const vamp::SceneLight& light);
 static const char* SceneObjectPlacementName(vamp::SceneObjectPlacement placement);
@@ -2224,6 +2231,7 @@ void EditorFrame(engine::RendererD3D12& renderer,
     // Submit textured ground tiles and placed objects as sprites
     if (sceneLoader.IsLoaded())
     {
+        EditorSubmitTileColorFills(editor, sceneLoader.GetSceneData(), grid, renderQueue, renderer);
         EditorSubmitGroundTiles(editor, sceneLoader.GetSceneData(), grid, renderQueue, renderer);
         EditorSubmitObjects(editor, sceneLoader.GetSceneData(), grid,
             renderQueue, renderer);
@@ -2607,5 +2615,94 @@ static void EditorSubmitLightMarkers(EditorState& editor,
 
         renderQueue.Submit(engine::RenderLayer::WallsProps, inst.sortY, 75,
             static_cast<uint16_t>(lightIndex & 0xFFFF), inst);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tile color-fill underlay: 1 hex sprite per tile, tinted by terrain type.
+// Drawn on the TileColorFill layer so it sits below grid lines, ground tile
+// textures, walls and actors -- this gives the editor a visible "tile-type
+// heatmap" without obscuring placed content.
+// ---------------------------------------------------------------------------
+static void EnsureTileFillTexture(EditorState& editor,
+    engine::RendererD3D12& renderer)
+{
+    if (editor.tileFillTextureLoaded)
+        return;
+
+    // Single white pixel; SpritePS multiplies texColor * inst.color, so this
+    // produces a flat color quad tinted by the per-instance color.
+    const uint8_t pixel[4] = { 255, 255, 255, 255 };
+    if (editor.tileFillTexture.CreateFromRGBA(
+            renderer.GetDevice(), renderer.GetCommandList(),
+            renderer.GetUploadManager(), renderer.GetSRVHeap(),
+            1, 1, pixel))
+    {
+        editor.tileFillTextureLoaded = true;
+    }
+}
+
+static DirectX::XMFLOAT4 TerrainFillColor(vamp::TerrainType t)
+{
+    // Muted palette: clearly distinguishable but doesn't fight the textures
+    // drawn on top. Alpha=1 because the cutout PSO writes opaquely.
+    switch (t)
+    {
+    case vamp::TerrainType::Floor:      return { 0.35f, 0.34f, 0.32f, 1.0f }; // gray
+    case vamp::TerrainType::Street:     return { 0.25f, 0.25f, 0.27f, 1.0f }; // dark gray
+    case vamp::TerrainType::Rubble:     return { 0.45f, 0.38f, 0.28f, 1.0f }; // tan
+    case vamp::TerrainType::Water:      return { 0.18f, 0.30f, 0.55f, 1.0f }; // blue
+    case vamp::TerrainType::Wall:       return { 0.42f, 0.25f, 0.18f, 1.0f }; // brown
+    case vamp::TerrainType::Door:       return { 0.55f, 0.40f, 0.20f, 1.0f }; // light brown
+    case vamp::TerrainType::MetroTrack: return { 0.30f, 0.30f, 0.35f, 1.0f }; // bluish gray
+    case vamp::TerrainType::Shadow:     return { 0.15f, 0.15f, 0.20f, 1.0f }; // very dark
+    default:                            return { 0.30f, 0.30f, 0.30f, 1.0f };
+    }
+}
+
+static void EditorSubmitTileColorFills(EditorState& editor,
+    const vamp::SceneData& scene,
+    const engine::Grid& grid,
+    engine::RenderQueue& renderQueue,
+    engine::RendererD3D12& renderer)
+{
+    EnsureTileFillTexture(editor, renderer);
+    if (!editor.tileFillTextureLoaded || !editor.tileFillTexture.IsValid())
+        return;
+
+    const int gridW = static_cast<int>(scene.header.gridWidth);
+    const int gridH = static_cast<int>(scene.header.gridHeight);
+
+    for (int y = 0; y < gridH; ++y)
+    {
+        for (int x = 0; x < gridW; ++x)
+        {
+            const vamp::MapTile& tile = scene.tiles[y * gridW + x];
+
+            // Size the quad to fully cover the hex / diamond bounding box.
+            DirectX::XMFLOAT2 top, right, bottom, left;
+            grid.TileDiamondVertices(x, y, top, right, bottom, left);
+            const float drawW = right.x - left.x;
+            const float drawH = bottom.y - top.y;
+            if (drawW <= 0.0f || drawH <= 0.0f)
+                continue;
+
+            const auto center = grid.TileToWorld(x, y);
+            const float tileBottomY = bottom.y;
+            const uint16_t tileOrder = static_cast<uint16_t>(((y & 0xFF) << 8) | (x & 0xFF));
+
+            engine::SpriteInstance inst;
+            inst.position     = center;
+            inst.size         = { drawW, drawH };
+            inst.uvRect       = { 0.0f, 0.0f, 1.0f, 1.0f };
+            inst.color        = TerrainFillColor(tile.terrain);
+            inst.rotation     = 0.0f;
+            inst.sortY        = tileBottomY;
+            inst.textureIndex = editor.tileFillTexture.GetSRVIndex();
+            inst.depthZ       = 0.92f; // matches DepthForLayer(TileColorFill)
+
+            renderQueue.Submit(engine::RenderLayer::TileColorFill,
+                               inst.sortY, 0, tileOrder, inst);
+        }
     }
 }

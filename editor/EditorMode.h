@@ -118,6 +118,10 @@ struct EditorState
     engine::Texture2D      lightMarkerTexture;
     bool                   lightMarkerTextureLoaded = false;
 
+    // 1x1 white texture used to draw colored hex fills (tinted via inst.color)
+    engine::Texture2D      tileFillTexture;
+    bool                   tileFillTextureLoaded = false;
+
     void ShutdownTextures(engine::PersistentDescriptorAllocator& srvHeap)
     {
         for (int i = 0; i < static_cast<int>(vamp::TerrainType::COUNT); ++i)
@@ -143,6 +147,12 @@ struct EditorState
         {
             lightMarkerTexture.Shutdown(srvHeap);
             lightMarkerTextureLoaded = false;
+        }
+
+        if (tileFillTextureLoaded)
+        {
+            tileFillTexture.Shutdown(srvHeap);
+            tileFillTextureLoaded = false;
         }
     }
 

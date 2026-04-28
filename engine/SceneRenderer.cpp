@@ -14,6 +14,8 @@ namespace
         switch (layer)
         {
         case RenderLayer::BackgroundPages:   return 0.95f;
+        case RenderLayer::TileColorFill:     return 0.92f;
+        case RenderLayer::GridLines:         return 0.88f;
         case RenderLayer::GroundTiles:       return 0.80f;
         case RenderLayer::WallsProps:        return 0.60f;
         case RenderLayer::Actors:            return 0.45f;
@@ -351,13 +353,15 @@ void SceneRenderer::PassBaseScene(ID3D12GraphicsCommandList* cmdList,
                                    const DirectX::XMFLOAT4* underlayGridColor)
 {
     // Collect items from GroundTiles through RoofActors
+    auto fillRange   = renderQueue.GetLayerRange(RenderLayer::TileColorFill);
     auto groundRange  = renderQueue.GetLayerRange(RenderLayer::GroundTiles);
     auto wallRange    = renderQueue.GetLayerRange(RenderLayer::WallsProps);
     auto actorRange   = renderQueue.GetLayerRange(RenderLayer::Actors);
     auto roofRange    = renderQueue.GetLayerRange(RenderLayer::Roofs);
     auto roofActRange = renderQueue.GetLayerRange(RenderLayer::RoofActors);
 
-    size_t totalItems = (groundRange.end - groundRange.begin)
+    size_t totalItems = (fillRange.end - fillRange.begin)
+                      + (groundRange.end - groundRange.begin)
                       + (wallRange.end - wallRange.begin)
                       + (actorRange.end - actorRange.begin)
                       + (roofRange.end - roofRange.begin)
@@ -381,11 +385,13 @@ void SceneRenderer::PassBaseScene(ID3D12GraphicsCommandList* cmdList,
     cmdList->RSSetViewports(1, &vp);
     cmdList->RSSetScissorRects(1, &scissor);
 
-    // Build instance buffers by blend mode. Walls/props use an opaque cutout
-    // PSO so wall pixels stay solid even if the source texture has soft alpha.
+    // Build instance buffers by blend mode. TileColorFill, walls/props, ground
+    // and overlays each go through the most appropriate sprite PSO.
+    std::vector<SpriteInstance> fillInstances;
     std::vector<SpriteInstance> groundInstances;
     std::vector<SpriteInstance> cutoutInstances;
     std::vector<SpriteInstance> overlayInstances;
+    fillInstances.reserve(fillRange.end - fillRange.begin);
     groundInstances.reserve(groundRange.end - groundRange.begin);
     cutoutInstances.reserve(wallRange.end - wallRange.begin);
     overlayInstances.reserve((actorRange.end - actorRange.begin)
@@ -393,6 +399,13 @@ void SceneRenderer::PassBaseScene(ID3D12GraphicsCommandList* cmdList,
                            + (roofActRange.end - roofActRange.begin));
 
     const auto& items = renderQueue.GetItems();
+    for (size_t i = fillRange.begin; i < fillRange.end; ++i)
+    {
+        SpriteInstance inst = items[i].instance;
+        if (inst.depthZ <= 0.0f)
+            inst.depthZ = DepthForLayer(RenderLayer::TileColorFill);
+        fillInstances.push_back(inst);
+    }
     for (size_t i = groundRange.begin; i < groundRange.end; ++i)
     {
         SpriteInstance inst = items[i].instance;
@@ -429,12 +442,15 @@ void SceneRenderer::PassBaseScene(ID3D12GraphicsCommandList* cmdList,
         overlayInstances.push_back(inst);
     }
 
-    if (!groundInstances.empty())
+    // 1) Tile color fills: opaque hex sprites under everything else.
+    if (!fillInstances.empty())
     {
-        BindSpritePipeline(cmdList, renderer, m_pso, m_frameCBVAddress, m_pso.GetSpritePSO());
-        DrawSpriteInstances(cmdList, renderer, groundInstances);
+        BindSpritePipeline(cmdList, renderer, m_pso, m_frameCBVAddress, m_pso.GetSpriteCutoutPSO());
+        DrawSpriteInstances(cmdList, renderer, fillInstances);
     }
 
+    // 2) Grid lines: drawn between fills and ground textures so that walls,
+    //    actors and roofs all naturally cover them.
     if (underlayGrid != nullptr && underlayGridColor != nullptr)
     {
         DrawGridOverlayToScene(renderer, camera, *underlayGrid,
@@ -442,12 +458,21 @@ void SceneRenderer::PassBaseScene(ID3D12GraphicsCommandList* cmdList,
                                underlayGridColor->z, underlayGridColor->w);
     }
 
+    // 3) Ground tile textures (alpha-blended).
+    if (!groundInstances.empty())
+    {
+        BindSpritePipeline(cmdList, renderer, m_pso, m_frameCBVAddress, m_pso.GetSpritePSO());
+        DrawSpriteInstances(cmdList, renderer, groundInstances);
+    }
+
+    // 4) Walls / placed objects (opaque cutout).
     if (!cutoutInstances.empty())
     {
         BindSpritePipeline(cmdList, renderer, m_pso, m_frameCBVAddress, m_pso.GetSpriteCutoutPSO());
         DrawSpriteInstances(cmdList, renderer, cutoutInstances);
     }
 
+    // 5) Actors / roofs / roof actors (alpha-blended).
     if (!overlayInstances.empty())
     {
         BindSpritePipeline(cmdList, renderer, m_pso, m_frameCBVAddress, m_pso.GetSpritePSO());

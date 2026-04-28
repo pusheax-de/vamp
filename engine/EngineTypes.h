@@ -28,6 +28,8 @@ struct RenderTargetHandle
 enum class RenderLayer : uint8_t
 {
     BackgroundPages = 0,
+    TileColorFill,      // Solid hex fills tinted by terrain type (editor debug)
+    GridLines,          // World-space grid line overlay (editor debug)
     GroundTiles,        // Decals, blood, scorch marks
     WallsProps,         // Walls rendered as separate sprites
     Actors,             // Characters, NPCs (Y-sorted)
