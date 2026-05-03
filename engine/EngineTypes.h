@@ -28,10 +28,10 @@ struct RenderTargetHandle
 enum class RenderLayer : uint8_t
 {
     BackgroundPages = 0,
-    TileColorFill,      // Solid hex fills tinted by terrain type (editor debug)
-    GridLines,          // World-space grid line overlay (editor debug)
-    GroundTiles,        // Decals, blood, scorch marks
-    WallsProps,         // Walls rendered as separate sprites
+    TileColorFill,      // Per-tile flat-color hex sprites (color backstop under ground textures)
+    GridLines,          // World-space grid line overlay (editor debug; not used by RenderQueue, see SceneRenderer::RenderFrame underlayGrid)
+    GroundTextures,     // Per-tile textured PNG (terrain art keyed by TerrainType)
+    PlacedObjects,      // SceneObject sprites (walls, props, fixtures, buildings)
     Actors,             // Characters, NPCs (Y-sorted)
     Roofs,              // Building roofs (conditionally visible)
     RoofActors,         // Characters on top of roofs

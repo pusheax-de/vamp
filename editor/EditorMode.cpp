@@ -15,11 +15,11 @@
 static void EnsureTerrainTexture(EditorState& editor,
                                  vamp::TerrainType terrain,
                                  engine::RendererD3D12& renderer);
-static void EditorSubmitGroundTiles(EditorState& editor,
-                                    const vamp::SceneData& scene,
-                                    const engine::Grid& grid,
-                                    engine::RenderQueue& renderQueue,
-                                    engine::RendererD3D12& renderer);
+static void EditorSubmitGroundTextures(EditorState& editor,
+                                       const vamp::SceneData& scene,
+                                       const engine::Grid& grid,
+                                       engine::RenderQueue& renderQueue,
+                                       engine::RendererD3D12& renderer);
 static engine::Texture2D* EnsureObjectTexture(EditorState& editor,
                                               const char* imagePath,
                                               engine::RendererD3D12& renderer);
@@ -2232,7 +2232,7 @@ void EditorFrame(engine::RendererD3D12& renderer,
     if (sceneLoader.IsLoaded())
     {
         EditorSubmitTileColorFills(editor, sceneLoader.GetSceneData(), grid, renderQueue, renderer);
-        EditorSubmitGroundTiles(editor, sceneLoader.GetSceneData(), grid, renderQueue, renderer);
+        EditorSubmitGroundTextures(editor, sceneLoader.GetSceneData(), grid, renderQueue, renderer);
         EditorSubmitObjects(editor, sceneLoader.GetSceneData(), grid,
             renderQueue, renderer);
         EditorSubmitLightMarkers(editor, sceneLoader.GetSceneData(), grid, renderQueue, renderer);
@@ -2300,9 +2300,10 @@ static void EnsureTerrainTexture(EditorState& editor,
 }
 
 // ---------------------------------------------------------------------------
-// Submit textured ground tiles as sprites
+// Submit textured ground tiles as sprites (one textured PNG per tile,
+// keyed by TerrainType).
 // ---------------------------------------------------------------------------
-static void EditorSubmitGroundTiles(EditorState& editor,
+static void EditorSubmitGroundTextures(EditorState& editor,
     const vamp::SceneData& scene,
     const engine::Grid& grid,
     engine::RenderQueue& renderQueue,
@@ -2362,7 +2363,7 @@ static void EditorSubmitGroundTiles(EditorState& editor,
             inst.textureIndex = editor.terrainTextures[texIdx].GetSRVIndex();
             inst.depthZ = 0.80f + 0.02f * static_cast<float>(hexColor);
 
-            renderQueue.Submit(engine::RenderLayer::GroundTiles, inst.sortY, 0, tileOrder, inst);
+            renderQueue.Submit(engine::RenderLayer::GroundTextures, inst.sortY, 0, tileOrder, inst);
         }
     }
 }
@@ -2534,9 +2535,9 @@ static void EditorSubmitObjects(EditorState& editor,
         inst.textureIndex = objectTexture->GetSRVIndex();
         inst.depthZ = 0.55f;
 
-        // Keep placed objects on the cutout sprite path so wall/object pixels
-        // render solid, but place them in front of terrain tiles via depth.
-        renderQueue.Submit(engine::RenderLayer::WallsProps,
+        // Placed objects use the cutout sprite path so wall/prop/fixture
+        // pixels render solid; depth keeps them in front of terrain.
+        renderQueue.Submit(engine::RenderLayer::PlacedObjects,
                            inst.sortY, 50,
                            static_cast<uint16_t>(objIndex & 0xFFFF), inst);
     }
@@ -2613,7 +2614,7 @@ static void EditorSubmitLightMarkers(EditorState& editor,
         inst.textureIndex = editor.lightMarkerTexture.GetSRVIndex();
         inst.depthZ = 0.5f;
 
-        renderQueue.Submit(engine::RenderLayer::WallsProps, inst.sortY, 75,
+        renderQueue.Submit(engine::RenderLayer::PlacedObjects, inst.sortY, 75,
             static_cast<uint16_t>(lightIndex & 0xFFFF), inst);
     }
 }

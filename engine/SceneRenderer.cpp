@@ -16,8 +16,8 @@ namespace
         case RenderLayer::BackgroundPages:   return 0.95f;
         case RenderLayer::TileColorFill:     return 0.92f;
         case RenderLayer::GridLines:         return 0.88f;
-        case RenderLayer::GroundTiles:       return 0.80f;
-        case RenderLayer::WallsProps:        return 0.60f;
+        case RenderLayer::GroundTextures:    return 0.80f;
+        case RenderLayer::PlacedObjects:     return 0.60f;
         case RenderLayer::Actors:            return 0.45f;
         case RenderLayer::Roofs:             return 0.30f;
         case RenderLayer::RoofActors:        return 0.20f;
@@ -352,17 +352,17 @@ void SceneRenderer::PassBaseScene(ID3D12GraphicsCommandList* cmdList,
                                    const Grid* underlayGrid,
                                    const DirectX::XMFLOAT4* underlayGridColor)
 {
-    // Collect items from GroundTiles through RoofActors
-    auto fillRange   = renderQueue.GetLayerRange(RenderLayer::TileColorFill);
-    auto groundRange  = renderQueue.GetLayerRange(RenderLayer::GroundTiles);
-    auto wallRange    = renderQueue.GetLayerRange(RenderLayer::WallsProps);
+    // Collect ranges from each layer used by this pass.
+    auto fillRange    = renderQueue.GetLayerRange(RenderLayer::TileColorFill);
+    auto groundRange  = renderQueue.GetLayerRange(RenderLayer::GroundTextures);
+    auto objectRange  = renderQueue.GetLayerRange(RenderLayer::PlacedObjects);
     auto actorRange   = renderQueue.GetLayerRange(RenderLayer::Actors);
     auto roofRange    = renderQueue.GetLayerRange(RenderLayer::Roofs);
     auto roofActRange = renderQueue.GetLayerRange(RenderLayer::RoofActors);
 
     size_t totalItems = (fillRange.end - fillRange.begin)
                       + (groundRange.end - groundRange.begin)
-                      + (wallRange.end - wallRange.begin)
+                      + (objectRange.end - objectRange.begin)
                       + (actorRange.end - actorRange.begin)
                       + (roofRange.end - roofRange.begin)
                       + (roofActRange.end - roofActRange.begin);
@@ -385,15 +385,16 @@ void SceneRenderer::PassBaseScene(ID3D12GraphicsCommandList* cmdList,
     cmdList->RSSetViewports(1, &vp);
     cmdList->RSSetScissorRects(1, &scissor);
 
-    // Build instance buffers by blend mode. TileColorFill, walls/props, ground
-    // and overlays each go through the most appropriate sprite PSO.
+    // Build instance buffers by blend mode. Each layer is routed to the
+    // appropriate sprite PSO (cutout for opaque content, alpha-blended for
+    // textures and overlays).
     std::vector<SpriteInstance> fillInstances;
     std::vector<SpriteInstance> groundInstances;
-    std::vector<SpriteInstance> cutoutInstances;
+    std::vector<SpriteInstance> objectInstances;
     std::vector<SpriteInstance> overlayInstances;
     fillInstances.reserve(fillRange.end - fillRange.begin);
     groundInstances.reserve(groundRange.end - groundRange.begin);
-    cutoutInstances.reserve(wallRange.end - wallRange.begin);
+    objectInstances.reserve(objectRange.end - objectRange.begin);
     overlayInstances.reserve((actorRange.end - actorRange.begin)
                            + (roofRange.end - roofRange.begin)
                            + (roofActRange.end - roofActRange.begin));
@@ -410,15 +411,15 @@ void SceneRenderer::PassBaseScene(ID3D12GraphicsCommandList* cmdList,
     {
         SpriteInstance inst = items[i].instance;
         if (inst.depthZ <= 0.0f)
-            inst.depthZ = DepthForLayer(RenderLayer::GroundTiles);
+            inst.depthZ = DepthForLayer(RenderLayer::GroundTextures);
         groundInstances.push_back(inst);
     }
-    for (size_t i = wallRange.begin; i < wallRange.end; ++i)
+    for (size_t i = objectRange.begin; i < objectRange.end; ++i)
     {
         SpriteInstance inst = items[i].instance;
         if (inst.depthZ <= 0.0f)
-            inst.depthZ = DepthForLayer(RenderLayer::WallsProps);
-        cutoutInstances.push_back(inst);
+            inst.depthZ = DepthForLayer(RenderLayer::PlacedObjects);
+        objectInstances.push_back(inst);
     }
     for (size_t i = actorRange.begin; i < actorRange.end; ++i)
     {
@@ -465,11 +466,11 @@ void SceneRenderer::PassBaseScene(ID3D12GraphicsCommandList* cmdList,
         DrawSpriteInstances(cmdList, renderer, groundInstances);
     }
 
-    // 4) Walls / placed objects (opaque cutout).
-    if (!cutoutInstances.empty())
+    // 4) Placed objects (opaque cutout) -- walls, props, fixtures, buildings.
+    if (!objectInstances.empty())
     {
         BindSpritePipeline(cmdList, renderer, m_pso, m_frameCBVAddress, m_pso.GetSpriteCutoutPSO());
-        DrawSpriteInstances(cmdList, renderer, cutoutInstances);
+        DrawSpriteInstances(cmdList, renderer, objectInstances);
     }
 
     // 5) Actors / roofs / roof actors (alpha-blended).
