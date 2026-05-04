@@ -28,6 +28,7 @@ public:
     // PSOs
     ID3D12PipelineState* GetSpritePSO() const { return m_spritePSO.Get(); }
     ID3D12PipelineState* GetSpriteCutoutPSO() const { return m_spriteCutoutPSO.Get(); }
+    ID3D12PipelineState* GetSpriteHardCutoutPSO() const { return m_spriteHardCutoutPSO.Get(); }
     ID3D12PipelineState* GetSpriteScreenPSO() const { return m_spriteScreenPSO.Get(); }
     ID3D12PipelineState* GetSpriteScreenPointPSO() const { return m_spriteScreenPointPSO.Get(); }
     ID3D12PipelineState* GetShadowVolumePSO() const { return m_shadowVolumePSO.Get(); }
@@ -47,6 +48,7 @@ private:
 
     bool CreateSpritePSO(ID3D12Device* device, const std::wstring& shaderDir);
     bool CreateSpriteCutoutPSO(ID3D12Device* device, const std::wstring& shaderDir);
+    bool CreateSpriteHardCutoutPSO(ID3D12Device* device, const std::wstring& shaderDir);
     bool CreateSpriteScreenPSO(ID3D12Device* device, const std::wstring& shaderDir);
     bool CreateSpriteScreenPointPSO(ID3D12Device* device, const std::wstring& shaderDir);
     bool CreateShadowVolumePSO(ID3D12Device* device, const std::wstring& shaderDir);
@@ -70,6 +72,7 @@ private:
     // PSOs
     ComPtr<ID3D12PipelineState> m_spritePSO;
     ComPtr<ID3D12PipelineState> m_spriteCutoutPSO;
+    ComPtr<ID3D12PipelineState> m_spriteHardCutoutPSO;
     ComPtr<ID3D12PipelineState> m_spriteScreenPSO;  // Same as sprite but targets UNORM backbuffer
     ComPtr<ID3D12PipelineState> m_spriteScreenPointPSO; // UNORM backbuffer + point sampling
     ComPtr<ID3D12PipelineState> m_shadowVolumePSO;

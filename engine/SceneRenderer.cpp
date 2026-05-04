@@ -459,17 +459,19 @@ void SceneRenderer::PassBaseScene(ID3D12GraphicsCommandList* cmdList,
                                underlayGridColor->z, underlayGridColor->w);
     }
 
-    // 3) Ground tile textures (alpha-blended).
+    // 3) Ground tile textures. Use the cutout PSO so terrain art follows the
+    // same solid-pixel path as placed wall sprites while we validate terrain
+    // texture binding in the editor.
     if (!groundInstances.empty())
     {
-        BindSpritePipeline(cmdList, renderer, m_pso, m_frameCBVAddress, m_pso.GetSpritePSO());
+        BindSpritePipeline(cmdList, renderer, m_pso, m_frameCBVAddress, m_pso.GetSpriteCutoutPSO());
         DrawSpriteInstances(cmdList, renderer, groundInstances);
     }
 
-    // 4) Placed objects (opaque cutout) -- walls, props, fixtures, buildings.
+    // 4) Placed objects (hard cutout) -- walls, props, fixtures, buildings.
     if (!objectInstances.empty())
     {
-        BindSpritePipeline(cmdList, renderer, m_pso, m_frameCBVAddress, m_pso.GetSpriteCutoutPSO());
+        BindSpritePipeline(cmdList, renderer, m_pso, m_frameCBVAddress, m_pso.GetSpriteHardCutoutPSO());
         DrawSpriteInstances(cmdList, renderer, objectInstances);
     }
 

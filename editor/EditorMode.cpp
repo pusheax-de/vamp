@@ -2231,7 +2231,7 @@ void EditorFrame(engine::RendererD3D12& renderer,
     // Submit textured ground tiles and placed objects as sprites
     if (sceneLoader.IsLoaded())
     {
-        EditorSubmitTileColorFills(editor, sceneLoader.GetSceneData(), grid, renderQueue, renderer);
+        //EditorSubmitTileColorFills(editor, sceneLoader.GetSceneData(), grid, renderQueue, renderer);
         EditorSubmitGroundTextures(editor, sceneLoader.GetSceneData(), grid, renderQueue, renderer);
         EditorSubmitObjects(editor, sceneLoader.GetSceneData(), grid,
             renderQueue, renderer);
@@ -2634,7 +2634,7 @@ static void EditorSubmitLightMarkers(EditorState& editor,
         inst.textureIndex = editor.lightMarkerTexture.GetSRVIndex();
         inst.depthZ = 0.5f;
 
-        renderQueue.Submit(engine::RenderLayer::PlacedObjects, inst.sortY, 75,
+        renderQueue.Submit(engine::RenderLayer::Actors, inst.sortY, 75,
             static_cast<uint16_t>(lightIndex & 0xFFFF), inst);
     }
 }
