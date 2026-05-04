@@ -4,6 +4,7 @@
 #include <cstring>
 #include <cassert>
 #include <cmath> // For std::floor
+#include <windows.h> // For OutputDebugStringA
 
 namespace ui
 {
@@ -20,7 +21,10 @@ bool UIRenderer::Init(ID3D12Device* device,
     // Create a 1x1 white pixel texture for solid-color rects
     uint32_t white = 0xFFFFFFFF;
     if (!m_whiteTexture.CreateFromRGBA(device, cmdList, uploadMgr, srvHeap, 1, 1, &white))
+    {
+        OutputDebugStringA("[UIRenderer] ERROR: failed to create 1x1 white texture. UI rects/text will not render.\n");
         return false;
+    }
 
     return true;
 }

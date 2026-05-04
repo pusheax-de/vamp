@@ -2278,6 +2278,10 @@ static void EnsureTerrainTexture(EditorState& editor,
 
     if (editor.terrainTexturePaths[idx].empty())
     {
+        std::ostringstream ss;
+        ss << "[Editor] WARNING: no PNG path for TerrainType " << idx
+           << " (" << EditorTerrainName(terrain) << "). Tile will fall back to color fill only.\n";
+        OutputDebugStringA(ss.str().c_str());
         editor.terrainTexturesLoaded[idx] = true;
         return;
     }
@@ -2292,10 +2296,21 @@ static void EnsureTerrainTexture(EditorState& editor,
         renderer.GetUploadManager(), renderer.GetSRVHeap(), fullPath))
     {
         editor.terrainTexturesLoaded[idx] = true;
+        std::ostringstream ss;
+        ss << "[Editor] Loaded terrain texture: " << imagePath
+           << " (" << EditorTerrainName(terrain) << ", "
+           << editor.terrainTextures[idx].GetWidth() << "x"
+           << editor.terrainTextures[idx].GetHeight() << ")\n";
+        OutputDebugStringA(ss.str().c_str());
     }
     else
     {
         editor.terrainTexturesLoaded[idx] = true;
+        std::ostringstream ss;
+        ss << "[Editor] ERROR: failed to load terrain PNG: " << imagePath
+           << " (" << EditorTerrainName(terrain)
+           << "). Tile will fall back to color fill only.\n";
+        OutputDebugStringA(ss.str().c_str());
     }
 }
 
@@ -2585,6 +2600,11 @@ static void EnsureLightMarkerTexture(EditorState& editor,
     {
         editor.lightMarkerTextureLoaded = true;
     }
+    else
+    {
+        editor.lightMarkerTextureLoaded = true;
+        OutputDebugStringA("[Editor] ERROR: failed to create light marker texture (16x16 procedural). Light markers will not appear.\n");
+    }
 }
 
 static void EditorSubmitLightMarkers(EditorState& editor,
@@ -2641,22 +2661,30 @@ static void EnsureTileFillTexture(EditorState& editor,
     {
         editor.tileFillTextureLoaded = true;
     }
+    else
+    {
+        editor.tileFillTextureLoaded = true;
+        OutputDebugStringA("[Editor] ERROR: failed to create tile fill texture (1x1 white). Tile color fills will not appear.\n");
+    }
 }
 
 static DirectX::XMFLOAT4 TerrainFillColor(vamp::TerrainType t)
 {
-    // Muted palette: clearly distinguishable but doesn't fight the textures
-    // drawn on top. Alpha=1 because the cutout PSO writes opaquely.
+    // Colors below are sampled from the actual terrain PNGs in assets/floor/
+    // (average of opaque pixels). Keeping the fill close to the texture color
+    // means the alpha-soft hex edges of the texture blend cleanly with the
+    // underlay instead of producing a contrasting halo. Alpha=1 because the
+    // cutout PSO writes opaquely.
     switch (t)
     {
-    case vamp::TerrainType::Floor:      return { 0.35f, 0.34f, 0.32f, 1.0f }; // gray
-    case vamp::TerrainType::Street:     return { 0.25f, 0.25f, 0.27f, 1.0f }; // dark gray
-    case vamp::TerrainType::Rubble:     return { 0.45f, 0.38f, 0.28f, 1.0f }; // tan
-    case vamp::TerrainType::Water:      return { 0.18f, 0.30f, 0.55f, 1.0f }; // blue
-    case vamp::TerrainType::Wall:       return { 0.42f, 0.25f, 0.18f, 1.0f }; // brown
-    case vamp::TerrainType::Door:       return { 0.55f, 0.40f, 0.20f, 1.0f }; // light brown
-    case vamp::TerrainType::MetroTrack: return { 0.30f, 0.30f, 0.35f, 1.0f }; // bluish gray
-    case vamp::TerrainType::Shadow:     return { 0.15f, 0.15f, 0.20f, 1.0f }; // very dark
+    case vamp::TerrainType::Floor:      return { 0.23f, 0.23f, 0.23f, 1.0f }; // dark gray  (floor.png)
+    case vamp::TerrainType::Street:     return { 0.24f, 0.23f, 0.01f, 1.0f }; // dark olive (street.png)
+    case vamp::TerrainType::Rubble:     return { 0.56f, 0.36f, 0.01f, 1.0f }; // amber      (rubble.png)
+    case vamp::TerrainType::Water:      return { 0.04f, 0.40f, 0.68f, 1.0f }; // blue       (water.png)
+    case vamp::TerrainType::Wall:       return { 0.60f, 0.00f, 0.60f, 1.0f }; // magenta    (wall.png)
+    case vamp::TerrainType::Door:       return { 0.41f, 0.31f, 0.00f, 1.0f }; // dark olive (door.png)
+    case vamp::TerrainType::MetroTrack: return { 0.30f, 0.20f, 0.11f, 1.0f }; // brown      (metrotrack.png)
+    case vamp::TerrainType::Shadow:     return { 0.00f, 0.00f, 0.00f, 1.0f }; // black      (shadow.png)
     default:                            return { 0.30f, 0.30f, 0.30f, 1.0f };
     }
 }

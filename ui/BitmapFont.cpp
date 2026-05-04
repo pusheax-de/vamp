@@ -179,6 +179,10 @@ bool BitmapFont::Create(ID3D12Device* device,
                                        static_cast<uint32_t>(atlasWidth),
                                        static_cast<uint32_t>(atlasHeight),
                                        rgba.data());
+    if (!ok)
+    {
+        OutputDebugStringA("[BitmapFont] ERROR: failed to upload font atlas texture to GPU. Text will not render.\n");
+    }
 
     // --- Cleanup GDI ---
 

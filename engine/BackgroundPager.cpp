@@ -5,6 +5,8 @@
 #include "UploadManager.h"
 #include <algorithm>
 #include <cmath>
+#include <string>
+#include <windows.h>
 
 namespace engine
 {
@@ -78,7 +80,7 @@ void BackgroundPager::Update(const Camera2D& camera, uint32_t frameNumber)
             auto it = m_pageToCache.find(key);
             if (it != m_pageToCache.end())
             {
-                // Already cached — mark as used
+                // Already cached ï¿½ mark as used
                 m_cache[it->second].lastUsedFrame = m_currentFrame;
             }
             else
@@ -128,6 +130,18 @@ void BackgroundPager::ProcessPendingLoads(ID3D12Device* device,
             m_pageToCache[key]          = slot;
             ++loadCount;
         }
+        else
+        {
+            char buf[512];
+            int n = WideCharToMultiByte(CP_ACP, 0, filePath.c_str(), -1,
+                                         buf, sizeof(buf), nullptr, nullptr);
+            (void)n;
+            std::string narrow = (n > 0) ? std::string(buf) : std::string("<unprintable>");
+            std::string msg = "[BackgroundPager] ERROR: failed to load DDS page: ";
+            msg += narrow;
+            msg += "\n";
+            OutputDebugStringA(msg.c_str());
+        }
     }
 }
 
@@ -173,7 +187,18 @@ bool BackgroundPager::SetBackgroundImage(ID3D12Device* device,
     }
 
     if (!m_bgImageTex.LoadFromPNG(device, cmdList, uploadMgr, srvHeap, imagePath))
+    {
+        char buf[512];
+        int n = WideCharToMultiByte(CP_ACP, 0, imagePath.c_str(), -1,
+                                     buf, sizeof(buf), nullptr, nullptr);
+        (void)n;
+        std::string narrow = (n > 0) ? std::string(buf) : std::string("<unprintable>");
+        std::string msg = "[BackgroundPager] ERROR: failed to load background image: ";
+        msg += narrow;
+        msg += "\n";
+        OutputDebugStringA(msg.c_str());
         return false;
+    }
 
     m_bgImageWorldX = worldX;
     m_bgImageWorldY = worldY;
@@ -227,7 +252,7 @@ uint32_t BackgroundPager::FindOrEvictCacheSlot(const PageKey& key)
     }
 
     if (lruFrame == UINT32_MAX)
-        return UINT32_MAX; // All slots are visible — can't evict
+        return UINT32_MAX; // All slots are visible ï¿½ can't evict
 
     return lruIndex;
 }

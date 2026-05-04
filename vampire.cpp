@@ -843,10 +843,13 @@ static void CreatePlayerIndicator()
     auto* device  = g_renderer.GetDevice();
     auto* cmdList = g_renderer.GetCommandList();
 
-    g_playerIndicatorTex.CreateFromRGBA(device, cmdList,
-                                         g_renderer.GetUploadManager(),
-                                         g_renderer.GetSRVHeap(),
-                                         kTexSize, kTexSize, pixels.data());
+    if (!g_playerIndicatorTex.CreateFromRGBA(device, cmdList,
+                                              g_renderer.GetUploadManager(),
+                                              g_renderer.GetSRVHeap(),
+                                              kTexSize, kTexSize, pixels.data()))
+    {
+        OutputDebugStringA("[Vampire] ERROR: failed to create player indicator texture. Player will not be visible.\n");
+    }
     g_playerIndicatorReady = true;
 }
 
